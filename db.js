@@ -41,6 +41,9 @@ async function initSchema() {
       PRIMARY KEY ("userId", "skinId")
     )
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS "manualOverride" BOOLEAN DEFAULT false
+  `);
 }
 
 module.exports = { pool, initSchema };

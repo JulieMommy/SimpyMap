@@ -146,10 +146,16 @@ function fetchPlace(lat, lng) {
     .catch(() => ({ country: 'Unknown', city: '' }));
 }
 
+function isManualOverrideRow(row) {
+  return row && (row.manualOverride === true || row.manualOverride === 't');
+}
+
 async function fillUnknownCountries() {
   try {
     const { rows } = await pool.query(
-      "SELECT id, lat, lng FROM users WHERE country IS NULL OR country = '' OR country = 'Unknown'"
+      `SELECT id, lat, lng FROM users
+       WHERE (country IS NULL OR country = '' OR country = 'Unknown')
+         AND COALESCE("manualOverride", false) = false`
     );
     if (!rows.length) return;
     for (const u of rows) {
@@ -199,10 +205,15 @@ app.post('/api/position', async (req, res) => {
 
   try {
     const { rows: existing } = await pool.query(
-      'SELECT visits, skin, "lastVisitDate" FROM users WHERE id = $1',
+      'SELECT visits, skin, "lastVisitDate", "manualOverride" FROM users WHERE id = $1',
       [userId]
     );
     const row = existing[0] || null;
+    if (isManualOverrideRow(row)) {
+      const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
+      const nextPointAt = lastDate === today ? getNextPointAtUtc(today) : null;
+      return res.json({ ok: true, manualOverride: true, nextPointAt });
+    }
     const currentVisits = row && typeof row.visits === 'number' ? row.visits : 0;
     const lastDate = row && row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
     const alreadyCountedToday = lastDate === today;
@@ -267,6 +278,14 @@ app.post('/api/set-skin', async (req, res) => {
   const now = new Date().toISOString();
 
   try {
+    const { rows: lockRows } = await pool.query(
+      'SELECT "manualOverride" FROM users WHERE id = $1',
+      [userId]
+    );
+    if (isManualOverrideRow(lockRows[0])) {
+      return res.json({ ok: true, manualOverride: true });
+    }
+
     if (!cleanSkin) {
       await pool.query('UPDATE users SET skin = NULL, "updatedAt" = $1 WHERE id = $2', [now, userId]);
       return res.json({ ok: true });

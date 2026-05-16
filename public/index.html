@@ -1272,12 +1272,26 @@
       return div.innerHTML;
     }
 
+    let positionsRefreshMs = 60000;
+    let positionsRefreshTimer = null;
+    function schedulePositionsRefresh() {
+      if (positionsRefreshTimer) clearInterval(positionsRefreshTimer);
+      positionsRefreshTimer = setInterval(loadAllPositions, positionsRefreshMs);
+    }
+
     // Load all positions from server
     function loadAllPositions() {
       fetch('/api/positions')
         .then((res) => res.json())
         .then((users) => {
           const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+          const meRow = valid.find((u) => u.id === userId);
+          const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
+          const nextMs = meManual ? 10000 : 60000;
+          if (nextMs !== positionsRefreshMs) {
+            positionsRefreshMs = nextMs;
+            schedulePositionsRefresh();
+          }
           updateTopBarVisitors(valid.length);
           const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
           const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
@@ -1295,7 +1309,15 @@
               myVisits = visits;
               myLng = u.lng;
               amTopScorer = isTopScorer;
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, currentSkin);
+              if (u.username && String(u.username).trim()) {
+                username = String(u.username).trim().slice(0, 40);
+                localStorage.setItem('username', username);
+              }
+              if (skinId) {
+                currentSkin = skinId;
+                localStorage.setItem('skin', skinId);
+              }
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId);
               if (userMarker) {
                 userMarker.setLatLng([u.lat, u.lng]);
                 userMarker.setPopupContent(popupHtml);
@@ -1354,12 +1376,25 @@
               myVisits = visits;
               myLng = u.lng;
               amTopScorer = isTopScorer;
-              if (userMarker) return; // already shown, don't touch
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, currentSkin);
-              userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
-                .addTo(map)
-                .bindPopup(popupHtml);
-              map.setView([u.lat, u.lng], 6);
+              if (u.username && String(u.username).trim()) {
+                username = String(u.username).trim().slice(0, 40);
+                localStorage.setItem('username', username);
+              }
+              if (skinId) {
+                currentSkin = skinId;
+                localStorage.setItem('skin', skinId);
+              }
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId);
+              if (userMarker) {
+                userMarker.setLatLng([u.lat, u.lng]);
+                userMarker.setPopupContent(popupHtml);
+                userMarker.setIcon(meIcon);
+              } else {
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
+                  .addTo(map)
+                  .bindPopup(popupHtml);
+                map.setView([u.lat, u.lng], 6);
+              }
             } else {
               if (otherMarkers.has(key)) return; // déjà affiché, on ne touche pas
               const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId);
@@ -1661,8 +1696,7 @@
     }
     setupSkinPanel();
 
-    // Single refresh every 1 min (avoids duplicates and overlap with loadNewPositionsOnly)
-    setInterval(loadAllPositions, 60000);
+    schedulePositionsRefresh();
   </script>
 </body>
 </html>
