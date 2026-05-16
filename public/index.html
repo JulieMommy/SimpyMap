@@ -988,6 +988,7 @@
       return s ? s.imageUrl : null;
     }
     function canUseSkin(skinId, score) {
+      if (resolveHiddenSkinUrl(skinId)) return true;
       if (isSkinUrl(skinId)) return true;
       if (PAID_SKIN_IDS.includes(skinId)) return unlockedExternalSkins.includes(skinId);
       if (isFixedImageSkin(skinId)) return true;
@@ -1005,11 +1006,31 @@
       const s = SKINS.find((x) => x.id === (skinId || 'red'));
       return (s && s.hex) ? s.hex : '#b91c1c';
     }
+    /** hidden:MySkin → /skins/hidden/MySkin.png (not shown in skin panel) */
+    function resolveHiddenSkinUrl(skinId) {
+      const id = String(skinId || '').trim();
+      if (!id) return null;
+      if (id.startsWith('/skins/hidden/')) {
+        const rel = id.replace(/^\/skins\/hidden\//, '');
+        if (!rel || rel.includes('..') || rel.includes('/')) return null;
+        return `/skins/hidden/${rel.split('?')[0]}`;
+      }
+      if (!id.startsWith('hidden:')) return null;
+      let base = id.slice(7).trim().replace(/[^a-zA-Z0-9._-]/g, '');
+      if (!base) return null;
+      if (/\.(png|jpe?g|gif|webp)$/i.test(base)) return `/skins/hidden/${base}`;
+      return `/skins/hidden/${base}.png`;
+    }
     function getSkinStyle(skinId) {
       const id = (skinId && String(skinId).trim()) || 'red';
       const neutralRing = '#64748b';
       if (isSkinUrl(id)) {
         const safe = id.replace(/"/g, '&quot;');
+        return { style: `background-image:url(${safe});background-size:cover;background-color:#334155`, extraClass: '', ringColor: neutralRing };
+      }
+      const hiddenUrl = resolveHiddenSkinUrl(id);
+      if (hiddenUrl) {
+        const safe = hiddenUrl.replace(/"/g, '&quot;');
         return { style: `background-image:url(${safe});background-size:cover;background-color:#334155`, extraClass: '', ringColor: neutralRing };
       }
       const fixedUrl = getFixedImageUrl(id);

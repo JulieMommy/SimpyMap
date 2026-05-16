@@ -43,7 +43,33 @@ const PREFERRED_IMAGE_SKINS = [
 ];
 
 const SKINS_DIR = path.join(__dirname, 'public', 'skins');
+const HIDDEN_SKINS_DIR = path.join(SKINS_DIR, 'hidden');
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+const HIDDEN_SKIN_EXTS = ['.png', '.webp', '.jpg', '.jpeg', '.gif'];
+
+/** Skins in public/skins/hidden/ — not listed in /api/skins; use skin = hidden:FileName in Supabase */
+function resolveHiddenSkinUrl(skinId) {
+  const raw = String(skinId || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('/skins/hidden/')) {
+    const rel = raw.replace(/^\/skins\/hidden\//, '').replace(/\\/g, '/');
+    if (!rel || rel.includes('..') || rel.includes('/')) return null;
+    const filePath = path.join(HIDDEN_SKINS_DIR, path.basename(rel));
+    if (fs.existsSync(filePath) && IMAGE_EXT.test(filePath)) return `/skins/hidden/${path.basename(rel)}`;
+    return null;
+  }
+  if (!raw.startsWith('hidden:')) return null;
+  let base = raw.slice(7).trim();
+  if (!base || /[/\\]/.test(base)) return null;
+  base = base.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!base) return null;
+  const tryNames = IMAGE_EXT.test(base) ? [base] : HIDDEN_SKIN_EXTS.map((ext) => base + ext);
+  for (const name of tryNames) {
+    const filePath = path.join(HIDDEN_SKINS_DIR, name);
+    if (fs.existsSync(filePath)) return `/skins/hidden/${name}`;
+  }
+  return null;
+}
 
 function getFixedImageSkins() {
   try {
@@ -89,6 +115,7 @@ async function canUseSkin(skinId, userScore, userId) {
   if (!skinId) return true;
   const id = String(skinId).trim();
   if (id.startsWith('http://') || id.startsWith('https://')) return false;
+  if (resolveHiddenSkinUrl(id)) return true;
   if (PAID_SKINS.includes(id)) {
     if (!userId) return false;
     const { rows } = await pool.query(
