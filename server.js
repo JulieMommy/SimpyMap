@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +7,21 @@ const countries = require('i18n-iso-countries');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Serveur lancé");
+});
 
 // Middleware
 app.use(express.json());
