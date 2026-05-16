@@ -1,0 +1,183 @@
+[1mdiff --git a/server.js b/server.js[m
+[1mindex 012b9c4..59d3845 100644[m
+[1m--- a/server.js[m
+[1m+++ b/server.js[m
+[36m@@ -3,115 +3,40 @@[m [mconst express = require('express');[m
+ const fs = require('fs');[m
+ const path = require('path');[m
+ const countries = require('i18n-iso-countries');[m
+[32m+[m[32mconst { pool, initSchema } = require('./db.js');[m
+ [m
+ const app = express();[m
+ const PORT = process.env.PORT || 3000;[m
+ [m
+[31m-import pool from './db.js';     // ← Garde ou ajoute cette ligne[m
+[31m-[m
+[31m-const { Pool } = require('pg');[m
+[31m-[m
+[31m-const pool = new Pool({[m
+[31m-  connectionString: process.env.DATABASE_URL,[m
+[31m-  ssl: {[m
+[31m-    rejectUnauthorized: false[m
+[31m-  }[m
+[31m-});[m
+[31m-[m
+[31m-app.listen(PORT, "0.0.0.0", () => {[m
+[31m-  console.log("Serveur lancé");[m
+[31m-});[m
+[31m-[m
+[31m-// Middleware[m
+ app.use(express.json());[m
+ [m
+[31m-// API routes that must run before static (so POST /api/unlock-drone is never 404)[m
+ const DRONE_EXTERNAL_BASE = 'https://juliemommy.pythonanywhere.com';[m
+ const EXTERNAL_UNLOCK_SKIN_ID = 'Drone';[m
+[31m-// Skins affichés comme payants (verrouillés avec "5 €" sauf Drone qui a son propre flux)[m
+ const PAID_SKINS = ['Drone', 'blacked', 'Spiral'];[m
+ [m
+ app.get('/api/drone-url', (req, res) => {[m
+   res.json({ url: `${DRONE_EXTERNAL_BASE}/update` });[m
+ });[m
+[31m-app.post('/api/unlock-drone', (req, res) => {[m
+[32m+[m
+[32m+[m[32mapp.post('/api/unlock-drone', async (req, res) => {[m
+   const userId = (req.body && req.body.userId || '').toString().trim();[m
+   if (!userId) return res.status(400).json({ error: 'userId required' });[m
+[31m-  db.run('INSERT OR IGNORE INTO external_unlocks (userId, skinId, unlockedAt) VALUES (?, ?, datetime("now"))', [userId, EXTERNAL_UNLOCK_SKIN_ID], (err) => {[m
+[31m-    if (err) return res.status(500).json({ error: 'DB error' });[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    await pool.query([m
+[32m+[m[32m      `INSERT INTO external_unlocks ("userId", "skinId", "unlockedAt")[m
+[32m+[m[32m       VALUES ($1, $2, NOW())[m
+[32m+[m[32m       ON CONFLICT ("userId", "skinId") DO NOTHING`,[m
+[32m+[m[32m      [userId, EXTERNAL_UNLOCK_SKIN_ID][m
+[32m+[m[32m    );[m
+     res.json({ ok: true });[m
+[31m-  });[m
+[32m+[m[32m  } catch (err) {[m
+[32m+[m[32m    console.error('DB error:', err);[m
+[32m+[m[32m    res.status(500).json({ error: 'DB error' });[m
+[32m+[m[32m  }[m
+ });[m
+ [m
+ app.use(express.static(path.join(__dirname, 'public')));[m
+ [m
+[31m-db.serialize(() => {[m
+[31m-  db.run(`[m
+[31m-    CREATE TABLE IF NOT EXISTS users ([m
+[31m-      id TEXT PRIMARY KEY,[m
+[31m-      lat REAL,[m
+[31m-      lng REAL,[m
+[31m-      username TEXT,[m
+[31m-      visits INTEGER DEFAULT 0,[m
+[31m-      country TEXT,[m
+[31m-      createdAt TEXT,[m
+[31m-      updatedAt TEXT[m
+[31m-    )[m
+[31m-  `);[m
+[31m-[m
+[31m-  // Try to add columns if the table already existed (ignore errors if they already exist)[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN username TEXT', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (username) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN visits INTEGER DEFAULT 0', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (visits) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN country TEXT', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (country) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN city TEXT', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (city) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN skin TEXT', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (skin) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-  db.run('ALTER TABLE users ADD COLUMN lastVisitDate TEXT', (err) => {[m
+[31m-    if (err && !String(err.message).includes('duplicate column')) {[m
+[31m-      console.warn('ALTER TABLE users (lastVisitDate) failed (might already exist):', err.message);[m
+[31m-    }[m
+[31m-  });[m
+[31m-[m
+[31m-  db.run(`[m
+[31m-    CREATE TABLE IF NOT EXISTS external_unlocks ([m
+[31m-      userId TEXT NOT NULL,[m
+[31m-      skinId TEXT NOT NULL,[m
+[31m-      unlockedAt TEXT,[m
+[31m-      PRIMARY KEY (userId, skinId)[m
+[31m-    )[m
+[31m-  `);[m
+[31m-[m
+[31m-  // Nettoyer toute donnée de test / seed restante dans une ancienne base[m
+[31m-  db.run(`[m
+[31m-    DELETE FROM users WHERE[m
+[31m-      id = 'fake-paris' OR id = 'julie' OR id LIKE 'test%'[m
+[31m-      OR username IN ('Paris visitor', 'Test2', 'Test3')[m
+[31m-      OR username GLOB 'Test [0-9]*'[m
+[31m-  `);[m
+[31m-});[m
+[31m-[m
+[31m-// Fixed image skins: read from public/skins folder (any .png, .jpg, .jpeg, .gif, .webp)[m
+[31m-// Add images in public/skins/ and they appear automatically in the skin panel.[m
+[31m-// Preferred skins (explicit id/name). Use fileBaseName when the image filename differs from the skin id (e.g. SpiralEye.png → skin "Spiral").[m
+ const PREFERRED_IMAGE_SKINS = [[m
+   { id: 'Drone', name: 'Drone' },[m
+   { id: 'Spiral', name: 'Spiral', fileBaseName: 'SpiralEye' }[m
+[36m@@ -148,8 +73,6 @@[m [mfunction getFixedImageSkins() {[m
+   }[m
+ }[m
+ [m
+[31m-// Skin unlock rules (minVisits = minimum score to use this skin)[m
+[31m-// URLs (http/https) and unknown ids are allowed. Fixed image skin ids (from folder) are allowed.[m
+ const SKIN_REQUIREMENTS = {[m
+   red: {},[m
+   blue: {},[m
+[36m@@ -162,41 +85,44 @@[m [mconst SKIN_REQUIREMENTS = {[m
+   blacked: {}[m
+ };[m
+ [m
+[31m-function canUseSkin(skinId, userScore, userId, cb) {[m
+[31m-  if (typeof userId === 'function') {[m
+[31m-    cb = userId;[m
+[31m-    userId = null;[m
+[31m-  }[m
+[31m-  if (!skinId) return cb ? cb(true) : true;[m
+[32m+[m[32masync function canUseSkin(skinId, userScore, userId) {[m
+[32m+[m[32m  if (!skinId) return true;[m
+   const id = String(skinId).trim();[m
+[31m-  if (id.startsWith('http://') || id.startsWith('https://')) return cb ? cb(false) : false;[m
+[32m+[m[32m  if (id.startsWith('http://') || id.startsWith('https://')) return false;[m
+   if (PAID_SKINS.includes(id)) {[m
+[31m-    if (!userId) return cb ? cb(false) : false;[m
+[31m-    return db.get('SELECT 1 FROM external_unlocks WHERE userId = ? AND skinId = ?', [userId, id], (err, row) => {[m
+[31m-      if (cb) return cb(!err && !!row);[m
+[31m-      return !err && !!row;[m
+[31m-    });[m
+[32m+[m[32m    if (!userId) return false;[m
+[32m+[m[32m    const { rows } = await pool.query([m
+[32m+[m[32m      'SELECT 1 FROM external_unlocks WHERE "userId" = $1 AND "skinId" = $2',[m
+[32m+[m[32m      [userId, id][m
+[32m+[m[32m    );[m
+[32m+[m[32m    return rows.length > 0;[m
+   }[m
+[31m-  if (getFixedImageSkins().some((s) => s.id === id)) return cb ? cb(true) : true;[m
+[32m+[m[32m  if (getFixedImageSkins().some((s) => s.id === id)) return true;[m
+   const req = SKIN_REQUIREMENTS[id];[m
+[31m-  if (!req || req.minVisits == null) return cb ? cb(true) : true;[m
+[32m+[m[32m  if (!req || req.minVisits == null) return true;[m
+   const score = typeof userScore === 'number' ? userScore : 0;[m
+[31m-  const ok = score >= req.minVisits;[m
+[31m-  return cb ? cb(ok) : ok;[m
+[32m+[m[32m  return score >= req.minVisits;[m
+ }[m
+ [m
+[31m-// Expose fixed image skins + which external skins are unl

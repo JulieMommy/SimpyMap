@@ -10,7 +10,8 @@
     "map",
     "leaflet",
     "express",
-    "sqlite"
+    "postgresql",
+    "supabase"
   ],
   "author": "",
   "license": "MIT",
@@ -18,7 +19,6 @@
     "dotenv": "^17.4.2",
     "express": "^4.19.0",
     "i18n-iso-countries": "^7.14.0",
-    "pg": "^8.20.0",
-    "sqlite3": "^6.0.1"
+    "pg": "^8.20.0"
   }
 }
