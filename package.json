@@ -1,0 +1,22 @@
+{
+  "name": "juliemap",
+  "version": "1.0.0",
+  "description": "Carte du monde partagee avec positions des utilisateurs.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "map",
+    "leaflet",
+    "express",
+    "sqlite"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.0",
+    "i18n-iso-countries": "^7.14.0",
+    "sqlite3": "^5.1.7"
+  }
+}

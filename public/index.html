@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Juliemap · Shared world</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at bottom, #111827 0, #020617 60%, #000000 100%);
+      color: #e5e7eb;
+    }
+    #map {
+      position: absolute;
+      inset: 0;
+      background: #020617;
+    }
+    /* Very subtle red nacre glow over the whole map, above tiles */
+    #map::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at bottom, rgba(239, 68, 68, 0.18), transparent 60%),
+        radial-gradient(circle at top, rgba(248, 113, 113, 0.1), transparent 65%);
+      mix-blend-mode: screen;
+      opacity: 0.6;
+      z-index: 450;
+    }
+    
+    .top-bar {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(90deg, rgba(248, 113, 113, 0.96), rgba(147, 51, 234, 0.96));
+      color: #fee2e2;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 14px;
+      z-index: 1000;
+      backdrop-filter: blur(8px);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .top-bar span {
+      opacity: 0.9;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f973c7;
+      box-shadow: 0 0 8px rgba(249, 115, 199, 0.9);
+    }
+    .next-point-timer {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.92);
+      color: #e2e8f0;
+      padding: 8px 12px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      backdrop-filter: blur(8px);
+      min-width: 170px;
+    }
+    .next-point-header {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .next-point-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .next-point-header-top .label {
+      opacity: 0.85;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .next-point-header .countdown {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: #f973c7;
+    }
+    .next-point-timer.available .next-point-header .countdown {
+      color: #4ade80;
+    }
+    .next-point-chevron {
+      width: 12px;
+      height: 12px;
+      opacity: 0.8;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    .next-point-timer.is-collapsed .next-point-chevron {
+      transform: rotate(-90deg);
+    }
+    .next-point-body {
+      margin-top: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #94a3b8;
+    }
+    .next-point-body p {
+      margin: 0 0 4px;
+    }
+    .next-point-timer.is-collapsed .next-point-body {
+      display: none;
+    }
+    /* Map points: flat style, no gradient, no white highlight */
+    .me-dot,
+    .other-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .me-dot {
+      background: #c026d3;
+    }
+    .other-dot {
+      background: #b91c1c;
+    }
+    /* Visit-based rings for "other" (flat red dot + soft shadow, ring from band 2) */
+    .visit-band-1 .other-dot {
+      width: 14px;
+      height: 14px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .visit-band-2 .other-dot {
+      width: 15px;
+      height: 15px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(248, 113, 113, 0.35);
+    }
+    .visit-band-3 .other-dot {
+      width: 16px;
+      height: 16px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 5px rgba(248, 113, 113, 0.35);
+    }
+    .visit-band-4 .other-dot {
+      width: 17px;
+      height: 17px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 7px rgba(248, 113, 113, 0.4);
+    }
+    .visit-band-5 .other-dot {
+      width: 18px;
+      height: 18px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 9px rgba(248, 113, 113, 0.45);
+    }
+    .visit-band-6 .other-dot {
+      width: 19px;
+      height: 19px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 11px rgba(248, 113, 113, 0.5);
+    }
+    /* Visit-based rings for "me" (flat magenta dot + soft shadow) */
+    .me-dot-icon.visit-band-1 .me-dot {
+      width: 14px;
+      height: 14px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .me-dot-icon.visit-band-2 .me-dot {
+      width: 15px;
+      height: 15px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(244, 114, 182, 0.35);
+    }
+    .me-dot-icon.visit-band-3 .me-dot {
+      width: 16px;
+      height: 16px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 5px rgba(244, 114, 182, 0.35);
+    }
+    .me-dot-icon.visit-band-4 .me-dot {
+      width: 17px;
+      height: 17px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 7px rgba(244, 114, 182, 0.4);
+    }
+    .me-dot-icon.visit-band-5 .me-dot {
+      width: 18px;
+      height: 18px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 9px rgba(244, 114, 182, 0.45);
+    }
+    .me-dot-icon.visit-band-6 .me-dot {
+      width: 19px;
+      height: 19px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 11px rgba(244, 114, 182, 0.5);
+    }
+    /* Top score: yellow star */
+    .me-dot-icon.top-scorer .me-dot,
+    .other-dot-icon.top-scorer .other-dot {
+      width: 22px;
+      height: 22px;
+      border-radius: 0;
+      background: none;
+      box-shadow: none;
+      font-size: 24px;
+      line-height: 22px;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fef08a;
+      text-shadow: 0 0 8px rgba(254, 240, 138, 0.8), 0 1px 3px rgba(0, 0, 0, 0.5);
+    }
+    .me-dot-icon.top-scorer .me-dot::before,
+    .other-dot-icon.top-scorer .other-dot::before {
+      content: '★';
+    }
+    /* Spawn animation: from 1% to 150% then back to 100% */
+    .me-dot-icon.marker-spawn .me-dot,
+    .other-dot-icon.marker-spawn .other-dot {
+      transform-origin: center;
+      animation: marker-spawn 1s ease-out forwards;
+    }
+    @keyframes marker-spawn {
+      0% {
+        transform: scale(0.01);
+      }
+      50% {
+        transform: scale(1.5);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+    /* Overlay to ask for nickname */
+    .pseudo-overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at top, rgba(250, 232, 255, 0.96), rgba(148, 163, 255, 0.96));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    .pseudo-card {
+      background: rgba(253, 242, 255, 0.98);
+      border-radius: 24px;
+      padding: 24px 26px 20px;
+      box-shadow: 0 18px 45px rgba(148, 163, 255, 0.6);
+      max-width: 320px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(147, 51, 234, 0.15);
+    }
+    .pseudo-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #4c1d95;
+      margin-bottom: 4px;
+    }
+    .pseudo-subtitle {
+      font-size: 13px;
+      color: #6b21a8;
+      margin-bottom: 14px;
+    }
+    .pseudo-input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(147, 51, 234, 0.35);
+      outline: none;
+      font-size: 14px;
+      margin-bottom: 12px;
+      background: #fdf2ff;
+      color: #4b5563;
+    }
+    .pseudo-input:focus {
+      box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.7);
+      border-color: transparent;
+    }
+    .pseudo-button {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      background: linear-gradient(90deg, #f472b6, #a855f7);
+      color: #fdf2ff;
+      transition: transform 0.08s ease, box-shadow 0.08s ease, opacity 0.08s ease;
+      box-shadow: 0 10px 25px rgba(147, 51, 234, 0.5);
+    }
+    .pseudo-button:hover {
+      transform: translateY(-1px);
+      opacity: 0.95;
+      box-shadow: 0 14px 32px rgba(147, 51, 234, 0.65);
+    }
+    .pseudo-button:active {
+      transform: translateY(0);
+      box-shadow: 0 8px 18px rgba(147, 51, 234, 0.5);
+    }
+    .pseudo-error {
+      font-size: 12px;
+      color: #b91c1c;
+      min-height: 16px;
+      margin-bottom: 4px;
+    }
+    /* Map popups (Leaflet) */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 23, 42, 0.96);
+      color: #e5e7eb;
+      border-radius: 10px;
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.45);
+    }
+    .leaflet-popup-content {
+      margin: 8px 10px;
+      font-size: 13px;
+      color: #e5e7eb;
+    }
+    .leaflet-popup-tip {
+      background: rgba(15, 23, 42, 0.96);
+      border: 1px solid rgba(148, 163, 184, 0.45);
+    }
+    .leaflet-container a.leaflet-popup-close-button {
+      color: #9ca3af;
+    }
+    .leaflet-container a.leaflet-popup-close-button:hover {
+      color: #e5e7eb;
+    }
+    .popup-sub {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      color: #cbd5f5;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* Mobile tweaks */
+    @media (max-width: 768px) {
+      .top-bar {
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .next-point-timer {
+        top: 44px;
+        right: 8px;
+        font-size: 12px;
+        min-width: 0;
+        max-width: 200px;
+      }
+      .top-left-panels {
+        top: 70px;
+        left: 8px;
+        gap: 6px;
+      }
+      .skin-panel {
+        right: 8px;
+        top: auto;
+        bottom: 80px;
+      }
+      .leaderboard {
+        left: 8px;
+        right: auto;
+        bottom: 8px;
+        max-width: 220px;
+      }
+      .skin-panel-toggle span,
+      .last-joined-title,
+      .top-scores-title,
+      .leaderboard-title {
+        font-size: 11px;
+      }
+      .skin-item,
+      .last-joined-item,
+      .top-scores-item,
+      .leaderboard-item {
+        font-size: 11px;
+      }
+    }
+    .leaderboard {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(148, 163, 255, 0.25);
+      border-radius: 12px;
+      padding: 10px 14px 12px;
+      min-width: 160px;
+      backdrop-filter: blur(8px);
+    }
+    .leaderboard-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .leaderboard-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(248, 250, 252, 0.7);
+      margin: 0;
+    }
+    .leaderboard-chevron {
+      width: 14px;
+      height: 14px;
+      opacity: 0.8;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    .leaderboard.is-collapsed .leaderboard-chevron {
+      transform: rotate(-90deg);
+    }
+    .leaderboard-body {
+      overflow: hidden;
+      max-height: 380px;
+      transition: max-height 0.3s ease, opacity 0.25s ease;
+    }
+    .leaderboard.is-collapsed .leaderboard-body {
+      max-height: 0;
+      opacity: 0;
+    }
+    .leaderboard-list {
+      list-style: none;
+      margin: 0;
+      padding: 8px 0 0;
+    }
+    .leaderboard-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      padding: 3px 0;
+      color: #e2e8f0;
+    }
+    .leaderboard-item .rank {
+      color: rgba(248, 113, 113, 0.9);
+      font-weight: 600;
+      margin-right: 8px;
+      min-width: 18px;
+    }
+    .leaderboard-item .count {
+      color: rgba(196, 181, 253, 0.95);
+      font-weight: 600;
+    }
+    .leaderboard-item.is-you {
+      color: #fef08a;
+    }
+    .leaderboard-item.is-you .rank,
+    .leaderboard-item.is-you .count {
+      color: #fef08a;
+    }
+    .leaderboard-item.you-row .rank {
+      font-style: italic;
+      color: rgba(254, 240, 138, 0.95);
+    }
+    /* "Last joined" panel top left */
+    .last-joined {
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(148, 163, 255, 0.25);
+      border-radius: 12px;
+      padding: 10px 14px 12px;
+      min-width: 180px;
+      backdrop-filter: blur(8px);
+    }
+    .last-joined-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .last-joined-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(248, 250, 252, 0.7);
+      margin-bottom: 8px;
+    }
+    .last-joined-chevron {
+      width: 12px;
+      height: 12px;
+      opacity: 0.8;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    .last-joined.is-collapsed .last-joined-chevron {
+      transform: rotate(-90deg);
+    }
+    .last-joined-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .last-joined.is-collapsed .last-joined-list {
+      display: none;
+    }
+    .last-joined-item {
+      font-size: 12px;
+      padding: 4px 0;
+      color: #e2e8f0;
+      border-bottom: 1px solid rgba(148, 163, 255, 0.12);
+    }
+    .last-joined-item:last-child {
+      border-bottom: none;
+    }
+    .last-joined-item .name {
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+    .last-joined-item .city {
+      color: rgba(226, 232, 240, 0.85);
+      font-size: 11px;
+    }
+    .last-joined-item .time {
+      font-size: 11px;
+      color: rgba(248, 250, 252, 0.6);
+    }
+    /* Top-left panels container (Last joined + Top scores) */
+    .top-left-panels {
+      position: absolute;
+      top: 10px;
+      left: 16px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    /* Top 10 scores panel (below Last joined) */
+    .top-scores {
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(148, 163, 255, 0.25);
+      border-radius: 12px;
+      padding: 10px 14px 12px;
+      min-width: 180px;
+      backdrop-filter: blur(8px);
+    }
+    .top-scores-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .top-scores-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(248, 250, 252, 0.7);
+      margin-bottom: 8px;
+    }
+    .top-scores-chevron {
+      width: 12px;
+      height: 12px;
+      opacity: 0.8;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    .top-scores.is-collapsed .top-scores-chevron {
+      transform: rotate(-90deg);
+    }
+    .top-scores-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .top-scores.is-collapsed .top-scores-list {
+      display: none;
+    }
+    .top-scores-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      padding: 5px 0;
+      color: #e2e8f0;
+      border-bottom: 1px solid rgba(148, 163, 255, 0.12);
+    }
+    .top-scores-item:last-child {
+      border-bottom: none;
+    }
+    /* Dot = player skin (color or pattern) */
+    .top-scores-item .point-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+    }
+    .top-scores-item .point-dot.pattern-stripes { background: repeating-linear-gradient(-45deg, #b91c1c, #b91c1c 2px, #fca5a5 2px, #fca5a5 4px) !important; }
+    .top-scores-item .point-dot.pattern-dots { background: #2563eb; background-image: radial-gradient(circle at 20% 30%, rgba(255,255,255,0.9) 1px, transparent 1px), radial-gradient(circle at 60% 70%, rgba(255,255,255,0.9) 1px, transparent 1px); background-size: 4px 4px !important; }
+    .top-scores-item .point-dot.pattern-checker { background: linear-gradient(45deg, #16a34a 25%, transparent 25%), linear-gradient(-45deg, #16a34a 25%, transparent 25%); background-size: 4px 4px; background-position: 0 0, 0 2px; background-color: #15803d !important; }
+    .top-scores-item .point-dot.pattern-roulette { background: conic-gradient(from 0deg, #7c3aed 0deg, #c026d3 36deg, #7c3aed 72deg, #c026d3 108deg, #7c3aed 144deg, #c026d3 180deg, #7c3aed 216deg, #c026d3 252deg, #7c3aed 288deg, #c026d3 324deg, #7c3aed 360deg) !important; }
+    .top-scores-item .point-dot.pattern-blacked { background: #0f172a !important; display: flex; align-items: center; justify-content: center; }
+    .top-scores-item .point-dot.pattern-blacked::before { content: '\2660'; color: #fff; font-size: 0.75em; line-height: 1; }
+    .top-scores-item .point-star {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      font-size: 16px;
+      line-height: 18px;
+      text-align: center;
+      color: #fef08a;
+    }
+    .top-scores-item .name {
+      flex: 1;
+      font-weight: 600;
+      color: #f1f5f9;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .top-scores-item .score {
+      font-weight: 700;
+      color: rgba(196, 181, 253, 0.95);
+    }
+    .top-scores-item.is-me .name,
+    .top-scores-item.is-me .score {
+      color: #fef08a;
+    }
+    .top-scores-item.you-row {
+      border-top: 1px solid rgba(254, 240, 138, 0.3);
+      margin-top: 4px;
+      padding-top: 8px;
+    }
+    .top-scores-item .rank-label {
+      font-size: 11px;
+      color: rgba(248, 250, 252, 0.6);
+      margin-left: 4px;
+    }
+    /* Skins panel on the right (expandable) */
+    .skin-panel {
+      position: absolute;
+      top: 50%;
+      right: 0;
+      transform: translateY(-50%);
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(148, 163, 255, 0.25);
+      border-right: none;
+      border-radius: 12px 0 0 12px;
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: stretch;
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+    }
+    .skin-panel-toggle {
+      width: 40px;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      color: rgba(248, 250, 252, 0.8);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      padding: 12px 8px;
+    }
+    .skin-panel-toggle:hover {
+      color: #f1f5f9;
+    }
+    .skin-panel-chevron {
+      width: 14px;
+      height: 14px;
+      opacity: 0.8;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    .skin-panel.is-collapsed .skin-panel-chevron {
+      transform: rotate(180deg);
+    }
+    .skin-panel-body {
+      overflow: hidden;
+      max-width: 0;
+      transition: max-width 0.3s ease, padding 0.2s ease, opacity 0.25s ease;
+      opacity: 0;
+    }
+    .skin-panel:not(.is-collapsed) .skin-panel-body {
+      max-width: 180px;
+      opacity: 1;
+      padding: 12px 14px 12px 10px;
+    }
+    .skin-panel-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(248, 250, 252, 0.7);
+      margin-bottom: 10px;
+    }
+    .skin-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .skin-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      margin: 2px 0;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .skin-item .skin-item-name {
+      flex: 1;
+      min-width: 0;
+    }
+    .skin-item:hover {
+      background: rgba(148, 163, 255, 0.15);
+    }
+    .skin-item.is-active {
+      background: rgba(148, 163, 255, 0.25);
+    }
+    .skin-item-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    /* Patterns for map points */
+    .skin-dot.pattern-stripes {
+      background: repeating-linear-gradient(-45deg, #b91c1c, #b91c1c 3px, #fca5a5 3px, #fca5a5 6px) !important;
+    }
+    .skin-dot.pattern-dots {
+      background: #2563eb !important;
+      background-image: radial-gradient(circle at 20% 30%, rgba(255,255,255,0.9) 1px, transparent 1px), radial-gradient(circle at 60% 70%, rgba(255,255,255,0.9) 1px, transparent 1px), radial-gradient(circle at 70% 20%, rgba(255,255,255,0.9) 1px, transparent 1px) !important;
+      background-size: 5px 5px !important;
+    }
+    .skin-dot.pattern-checker {
+      background: linear-gradient(45deg, #16a34a 25%, transparent 25%), linear-gradient(-45deg, #16a34a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #16a34a 75%), linear-gradient(-45deg, transparent 75%, #16a34a 75%) !important;
+      background-size: 6px 6px !important;
+      background-position: 0 0, 0 3px, 3px -3px, -3px 0px !important;
+      background-color: #15803d !important;
+    }
+    .skin-dot.pattern-blacked { background: #0f172a !important; display: flex; align-items: center; justify-content: center; }
+    .skin-dot.pattern-blacked::before { content: '\2660'; color: #fff; font-size: 75%; line-height: 1; }
+    .skin-dot.pattern-roulette {
+      background: conic-gradient(from 0deg, #7c3aed 0deg, #c026d3 36deg, #7c3aed 72deg, #c026d3 108deg, #7c3aed 144deg, #c026d3 180deg, #7c3aed 216deg, #c026d3 252deg, #7c3aed 288deg, #c026d3 324deg, #7c3aed 360deg) !important;
+    }
+    .skin-item-dot.pattern-stripes { background: repeating-linear-gradient(-45deg, #b91c1c, #b91c1c 2px, #fca5a5 2px, #fca5a5 4px) !important; }
+    .skin-item-dot.pattern-dots { background: #2563eb; background-image: radial-gradient(circle at 20% 30%, rgba(255,255,255,0.9) 1px, transparent 1px), radial-gradient(circle at 60% 70%, rgba(255,255,255,0.9) 1px, transparent 1px); background-size: 4px 4px !important; }
+    .skin-item-dot.pattern-checker { background: linear-gradient(45deg, #16a34a 25%, transparent 25%), linear-gradient(-45deg, #16a34a 25%, transparent 25%); background-size: 4px 4px; background-position: 0 0, 0 2px; background-color: #15803d !important; }
+    .skin-item-dot.pattern-blacked { background: #0f172a !important; display: flex; align-items: center; justify-content: center; }
+    .skin-item-dot.pattern-blacked::before { content: '\2660'; color: #fff; font-size: 0.85em; line-height: 1; }
+    .skin-item-dot.pattern-roulette { background: conic-gradient(from 0deg, #7c3aed 0deg, #c026d3 36deg, #7c3aed 72deg, #c026d3 108deg, #7c3aed 144deg, #c026d3 180deg, #7c3aed 216deg, #c026d3 252deg, #7c3aed 288deg, #c026d3 324deg, #7c3aed 360deg) !important; }
+    .skin-item-name {
+      font-size: 13px;
+      color: #e2e8f0;
+    }
+    .skin-item.is-active .skin-item-name {
+      color: #f1f5f9;
+      font-weight: 600;
+    }
+    /* Points with skin keep the star if top-scorer (override inline background) */
+    .skin-item-top-scorer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 10px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(254, 240, 138, 0.25), rgba(250, 204, 21, 0.15));
+      border: 1px solid rgba(254, 240, 138, 0.4);
+      pointer-events: none;
+    }
+    .skin-item-top-scorer .skin-top-scorer-star {
+      width: 20px;
+      height: 20px;
+      font-size: 20px;
+      line-height: 20px;
+      text-align: center;
+      color: #fef08a;
+      text-shadow: 0 0 8px rgba(254, 240, 138, 0.8);
+      flex-shrink: 0;
+    }
+    .skin-item-top-scorer .skin-item-name {
+      color: #fef08a;
+      font-weight: 700;
+    }
+    .skin-item.is-locked {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+    /* Exceptions: skins qui doivent rester cliquables même verrouillés */
+    .skin-item.is-locked[data-external-unlock="drone"],
+    .skin-item.is-locked[data-skin-id="blacked"],
+    .skin-item.is-locked[data-skin-id="Spiral"] {
+      cursor: pointer;
+    }
+    .skin-item.is-locked[data-skin-id="blacked"]:hover,
+    .skin-item.is-locked[data-skin-id="Spiral"]:hover {
+      background: rgba(148, 163, 255, 0.2);
+      opacity: 0.9;
+    }
+    .skin-item-requirement {
+      font-size: 10px;
+      color: rgba(248, 250, 252, 0.5);
+      margin-left: auto;
+    }
+    .skin-item.is-locked .skin-item-requirement {
+      color: rgba(248, 113, 113, 0.9);
+    }
+    .me-dot-icon.top-scorer .skin-dot,
+    .other-dot-icon.top-scorer .skin-dot {
+      background: none !important;
+      background-image: none !important;
+      box-shadow: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="skin-panel is-collapsed" id="skin-panel">
+    <div class="skin-panel-toggle" id="skin-panel-toggle" title="Open / close skins">
+      <span>Skins</span>
+      <svg class="skin-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="skin-panel-body">
+      <div class="skin-panel-title">Color on map</div>
+      <ul class="skin-list" id="skin-list"></ul>
+    </div>
+  </div>
+  <div class="top-left-panels">
+    <div class="last-joined" id="last-joined">
+      <div class="last-joined-header" id="last-joined-header" title="Click to expand/collapse">
+        <div class="last-joined-title">Last joined</div>
+        <svg class="last-joined-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <ul class="last-joined-list" id="last-joined-list"></ul>
+    </div>
+    <div class="top-scores" id="top-scores">
+      <div class="top-scores-header" id="top-scores-header" title="Click to expand/collapse">
+        <div class="top-scores-title">Top 10 scores</div>
+        <svg class="top-scores-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <ul class="top-scores-list" id="top-scores-list"></ul>
+    </div>
+  </div>
+  <div class="leaderboard is-collapsed" id="leaderboard">
+    <div class="leaderboard-header" id="leaderboard-header" title="Click to expand/collapse">
+      <span class="leaderboard-title">Top 10 countries</span>
+      <svg class="leaderboard-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="leaderboard-body">
+      <ul class="leaderboard-list" id="leaderboard-list"></ul>
+    </div>
+  </div>
+  <div class="top-bar">
+    <div class="status-dot"></div>
+    <span id="top-bar-visitors">You are one of — visitors</span>
+  </div>
+  <div class="next-point-timer is-collapsed" id="next-point-timer" style="display: none;">
+    <div class="next-point-header" id="next-point-header" title="Click to expand/collapse">
+      <div class="next-point-header-top">
+        <div class="label">Next point in</div>
+        <svg class="next-point-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="countdown" id="next-point-countdown">—</div>
+    </div>
+    <div class="next-point-body">
+      <p>You gain <strong>1 point</strong> per day when you send your position.</p>
+      <p>Once you&apos;ve scored for today, you can earn a new point again after <strong>midnight (UTC)</strong>.</p>
+    </div>
+  </div>
+  <div class="pseudo-overlay" id="pseudo-overlay">
+    <div class="pseudo-card">
+      <div class="pseudo-title">Choose your name</div>
+      <div class="pseudo-subtitle">It will be visible to everyone on the map.</div>
+      <input
+        id="pseudo-input"
+        class="pseudo-input"
+        type="text"
+        maxlength="40"
+        placeholder="e.g. Julie, Alex, Luna..."
+      />
+      <div id="pseudo-error" class="pseudo-error"></div>
+      <button id="pseudo-button" class="pseudo-button">Let&apos;s go</button>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
+  <script>
+    // Generate / retrieve a persistent userId in this browser
+    function getOrCreateUserId() {
+      let id = localStorage.getItem('userId');
+      if (!id) {
+        if (window.crypto && crypto.randomUUID) {
+          id = crypto.randomUUID();
+        } else {
+          id = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        }
+        localStorage.setItem('userId', id);
+      }
+      return id;
+    }
+
+    const userId = getOrCreateUserId();
+    let username = null;
+
+    // Initialize the map with a simple style
+    const map = L.map('map', {
+      zoomControl: true,
+      worldCopyJump: false,
+      minZoom: 3,
+      maxZoom: 14,
+      wheelPxPerZoomLevel: 30
+    });
+
+    // Limit panning to a single world copy and restrict visible latitudes (crop Antarctica)
+    const bounds = [[-10, -180], [72, 180]];
+    map.setMaxBounds(bounds);
+    map.options.maxBoundsViscosity = 1.0;
+
+    // Dark basemap for a night-style ambiance (no horizontal world repeat)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 14,
+      noWrap: true,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    }).addTo(map);
+
+    // Fit the initial view to our rectangular world (cropped Antarctica)
+    map.fitBounds(bounds);
+
+    // Available skins (type: color | pattern | url for custom image)
+    const SKINS = [
+      { id: 'red', name: 'Red', hex: '#b91c1c' },
+      { id: 'blue', name: 'Blue', hex: '#2563eb' },
+      { id: 'green', name: 'Green', hex: '#16a34a', minVisits: 2 },
+      { id: 'yellow', name: 'Yellow', hex: '#ca8a04', minVisits: 2 },
+      { id: 'violet', name: 'Violet', hex: '#7c3aed', minVisits: 4 },
+      { id: 'magenta', name: 'Pink', hex: '#c026d3', minVisits: 4 },
+      { id: 'white', name: 'White', hex: '#f8fafc', minVisits: 4 },
+      { id: 'roulette', name: 'Roulette', type: 'pattern', pattern: 'roulette', hex: '#7c3aed', minVisits: 10 },
+      // BLACKED affiché tout en bas de la liste
+      { id: 'blacked', name: 'BLACKED', type: 'pattern', pattern: 'blacked', hex: '#0f172a' }
+    ];
+    let fixedImageSkins = []; // filled by GET /api/skins (backend-defined image URLs, read-only)
+    let unlockedExternalSkins = []; // e.g. ['Drone', 'blacked', 'Spiral'] when unlocked
+    const PAID_SKIN_IDS = ['Drone', 'blacked', 'Spiral'];
+    const PAID_SKIN_LABELS = { Drone: 'Become a Drone', blacked: '5 €', Spiral: '5 €' };
+    function isSkinUrl(s) {
+      const v = String(s || '').trim();
+      return v.startsWith('http://') || v.startsWith('https://');
+    }
+    function isFixedImageSkin(skinId) {
+      return fixedImageSkins.some((s) => s.id === skinId);
+    }
+    function getFixedImageUrl(skinId) {
+      const s = fixedImageSkins.find((x) => x.id === skinId);
+      return s ? s.imageUrl : null;
+    }
+    function canUseSkin(skinId, score) {
+      if (isSkinUrl(skinId)) return true;
+      if (PAID_SKIN_IDS.includes(skinId)) return unlockedExternalSkins.includes(skinId);
+      if (isFixedImageSkin(skinId)) return true;
+      const s = SKINS.find((x) => x.id === skinId);
+      if (!s || s.minVisits == null) return true;
+      return (typeof score === 'number' ? score : 0) >= s.minVisits;
+    }
+    function getSkinRequirementLabel(skin) {
+      if (!skin) return '';
+      if (PAID_SKIN_IDS.includes(skin.id)) return PAID_SKIN_LABELS[skin.id] || '5 €';
+      if (skin.minVisits != null) return `Score ${skin.minVisits}+`;
+      return '';
+    }
+    function getSkinColor(skinId) {
+      const s = SKINS.find((x) => x.id === (skinId || 'red'));
+      return (s && s.hex) ? s.hex : '#b91c1c';
+    }
+    function getSkinStyle(skinId) {
+      const id = (skinId && String(skinId).trim()) || 'red';
+      const neutralRing = '#64748b';
+      if (isSkinUrl(id)) {
+        const safe = id.replace(/"/g, '&quot;');
+        return { style: `background-image:url(${safe});background-size:cover;background-color:#334155`, extraClass: '', ringColor: neutralRing };
+      }
+      const fixedUrl = getFixedImageUrl(id);
+      if (fixedUrl) {
+        const safe = fixedUrl.replace(/"/g, '&quot;');
+        return { style: `background-image:url(${safe});background-size:cover;background-color:#334155`, extraClass: '', ringColor: neutralRing };
+      }
+      const s = SKINS.find((x) => x.id === id);
+      if (s && s.type === 'pattern' && s.pattern) {
+        return { style: '', extraClass: `pattern-${s.pattern}`, ringColor: neutralRing };
+      }
+      const color = getSkinColor(id);
+      return { style: `background:${color}`, extraClass: '', ringColor: color };
+    }
+    function hexToRgba(hex, alpha) {
+      const h = String(hex).replace('#', '');
+      if (h.length !== 6) return `rgba(185,28,28,${alpha})`;
+      const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+    function getRingShadow(hex, bandNum) {
+      if (bandNum <= 1) return '';
+      const px = 3 + (bandNum - 2) * 2; // 3,5,7,9,11
+      return `, 0 0 0 ${px}px ${hexToRgba(hex, 0.4)}`;
+    }
+
+    // Delay (seconds) for spawn animation: left (west) = 0, right (east) = max
+    function spawnDelayFromLng(lng) {
+      return ((Number(lng) + 180) / 360) * 1.2;
+    }
+
+    // Custom icons (color, pattern or image URL)
+    function createMeIcon(visits, lng, isTopScorer, skinId) {
+      const bandClass = getVisitBandClass(visits);
+      const bandNum = getVisitBandNumber(visits);
+      const size = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const delay = spawnDelayFromLng(lng);
+      const topClass = isTopScorer ? ' top-scorer' : '';
+      const skin = getSkinStyle(skinId);
+      const ringShadow = getRingShadow(skin.ringColor, bandNum);
+      const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
+      const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
+      return L.divIcon({
+        className: `me-dot-icon ${bandClass}${topClass} marker-spawn`,
+        html: `<div class="me-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2]
+      });
+    }
+
+    function getVisitBandClass(visits) {
+      if (!visits || visits <= 1) return 'visit-band-1';
+      if (visits <= 5) return 'visit-band-2';
+      if (visits <= 10) return 'visit-band-3';
+      if (visits <= 25) return 'visit-band-4';
+      if (visits <= 50) return 'visit-band-5';
+      return 'visit-band-6'; // 51-100+
+    }
+
+    function getVisitBandNumber(visits) {
+      if (!visits || visits <= 1) return 1;
+      if (visits <= 5) return 2;
+      if (visits <= 10) return 3;
+      if (visits <= 25) return 4;
+      if (visits <= 50) return 5;
+      return 6;
+    }
+
+    function createOtherIcon(visits, lng, isTopScorer, skinId) {
+      const bandClass = getVisitBandClass(visits);
+      const bandNum = getVisitBandNumber(visits);
+      const size = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const delay = spawnDelayFromLng(lng);
+      const topClass = isTopScorer ? ' top-scorer' : '';
+      const skin = getSkinStyle(skinId);
+      const ringShadow = getRingShadow(skin.ringColor, bandNum);
+      const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
+      const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
+      return L.divIcon({
+        className: `other-dot-icon ${bandClass}${topClass} marker-spawn`,
+        html: `<div class="other-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2]
+      });
+    }
+
+    let userMarker = null;
+    const otherMarkers = new Map(); // id -> marker
+    const userSkinsCache = new Map(); // id -> skin (filled by loadAllPositions, used by leaderboard)
+    let currentSkin = (localStorage.getItem('skin') || 'red').trim();
+    let myVisits = 1, myLng = 0, amTopScorer = false;
+
+    // Next-point timer: nextPointAt = ISO string (next UTC midnight) or null if available now
+    let nextPointAt = null;
+    function fetchNextPoint() {
+      fetch(`/api/next-point?userId=${encodeURIComponent(userId)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          nextPointAt = data.nextPointAt || null;
+          updateNextPointDisplay();
+        })
+        .catch(() => {});
+    }
+    function updateNextPointDisplay() {
+      const el = document.getElementById('next-point-timer');
+      const countEl = document.getElementById('next-point-countdown');
+      if (!el || !countEl) return;
+      el.style.display = '';
+      if (!nextPointAt) {
+        el.classList.add('available');
+        countEl.textContent = 'Available now';
+        return;
+      }
+      el.classList.remove('available');
+      const target = new Date(nextPointAt).getTime();
+      const now = Date.now();
+      const ms = Math.max(0, target - now);
+      if (ms <= 0) {
+        nextPointAt = null;
+        fetchNextPoint();
+        return;
+      }
+      const s = Math.floor(ms / 1000) % 60;
+      const m = Math.floor(ms / 60000) % 60;
+      const h = Math.floor(ms / 3600000);
+      countEl.textContent = `${h}h ${m}m ${s}s`;
+    }
+    setInterval(updateNextPointDisplay, 1000);
+    fetchNextPoint();
+
+    // Send position to server (with skin so everyone sees it)
+    function sendPosition(lat, lng) {
+      if (!username) return Promise.resolve();
+      return fetch('/api/position', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, lat, lng, username, skin: currentSkin }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.nextPointAt != null) nextPointAt = data.nextPointAt;
+          else nextPointAt = null;
+          updateNextPointDisplay();
+          return data;
+        });
+    }
+
+    function getPopupHtml(name, visits, isMe) {
+      const safeName = name || (isMe ? 'Me' : 'Guest');
+      const count = !visits || visits < 1 ? 1 : visits;
+      const times = count > 1 ? 'times' : 'time';
+      return `${safeName}<span class="popup-sub">CLICKED ${count} ${times}</span>`;
+    }
+
+    function updateTopBarVisitors(count) {
+      const el = document.getElementById('top-bar-visitors');
+      if (!el) return;
+      if (count == null || count === 0) {
+        el.textContent = 'You are one of — visitors';
+        return;
+      }
+      el.textContent = count === 1 ? 'You are the only visitor' : `You are one of ${count} visitors`;
+    }
+
+    function minutesAgo(isoDate) {
+      if (!isoDate) return '—';
+      const then = new Date(isoDate).getTime();
+      const now = Date.now();
+      const min = Math.floor((now - then) / 60000);
+      if (min < 1) return 'Just now';
+      if (min === 1) return '1 minute ago';
+      return `${min} minutes ago`;
+    }
+
+    function loadLastJoined() {
+      fetch('/api/last-joined')
+        .then((res) => res.json())
+        .then((data) => {
+          const list = document.getElementById('last-joined-list');
+          if (!list) return;
+          const users = (data.users || []).slice(0, 3);
+          if (users.length === 0) {
+            list.innerHTML = '<li class="last-joined-item">No one yet</li>';
+            return;
+          }
+          list.innerHTML = users
+            .map(
+              (u) =>
+                `<li class="last-joined-item"><span class="name">${escapeHtml(u.username || 'Guest')}</span><br><span class="city">${escapeHtml(u.city || '—')}</span> · <span class="time">${minutesAgo(u.updatedAt)}</span></li>`
+            )
+            .join('');
+        })
+        .catch(() => {
+          const list = document.getElementById('last-joined-list');
+          if (list) list.innerHTML = '<li class="last-joined-item">—</li>';
+        });
+    }
+
+    function rankSuffix(n) {
+      if (n >= 11 && n <= 13) return n + 'th';
+      const d = n % 10;
+      if (d === 1) return n + 'st';
+      if (d === 2) return n + 'nd';
+      if (d === 3) return n + 'rd';
+      return n + 'th';
+    }
+
+    function loadTopScores() {
+      fetch(`/api/top-scores?userId=${encodeURIComponent(userId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          const list = document.getElementById('top-scores-list');
+          if (!list) return;
+          const users = (data.users || []).slice(0, 10);
+          const you = data.you || null;
+          if (users.length === 0 && !you) {
+            list.innerHTML = '<li class="top-scores-item">No scores yet</li>';
+            return;
+          }
+          let html = users
+            .map((u, i) => {
+              const name = escapeHtml(u.username || 'Guest');
+              const isMe = String(u.id) === String(userId);
+              const isTop = i === 0;
+              const skinFromApi = (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : null;
+              const skin = skinFromApi || (isMe ? currentSkin : (userSkinsCache.get(u.id) || 'red'));
+              const skinStyle = getSkinStyle(skin);
+              const dotHtml = skinStyle.style
+                ? `<div class="point-dot" style="${skinStyle.style}"></div>`
+                : skinStyle.extraClass
+                  ? `<div class="point-dot ${skinStyle.extraClass}"></div>`
+                  : `<div class="point-dot" style="background:${getSkinColor(skin)} !important"></div>`;
+              const pointHtml = isTop && !isMe ? '<span class="point-star">★</span>' : dotHtml;
+              const meClass = isMe ? ' is-me' : '';
+              return `<li class="top-scores-item${meClass}">${pointHtml}<span class="name">${name}</span><span class="score">${u.score}</span></li>`;
+            })
+            .join('');
+          if (you) {
+            const rankStr = rankSuffix(you.rank);
+            const youSkin = (you.skin != null && String(you.skin).trim()) ? String(you.skin).trim() : currentSkin;
+            const youSkinStyle = getSkinStyle(youSkin || 'red');
+            const youPointHtml = youSkinStyle.style
+              ? `<div class="point-dot" style="${youSkinStyle.style}"></div>`
+              : youSkinStyle.extraClass
+                ? `<div class="point-dot ${youSkinStyle.extraClass}"></div>`
+                : `<div class="point-dot" style="background:${getSkinColor(youSkin)} !important"></div>`;
+            html += `<li class="top-scores-item is-me you-row">${youPointHtml}<span class="name">${escapeHtml(you.username)}</span><span class="rank-label">${rankStr}</span><span class="score">${you.score}</span></li>`;
+          }
+          list.innerHTML = html;
+        })
+        .catch(() => {
+          const list = document.getElementById('top-scores-list');
+          if (list) list.innerHTML = '<li class="top-scores-item">—</li>';
+        });
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    // Load all positions from server
+    function loadAllPositions() {
+      fetch('/api/positions')
+        .then((res) => res.json())
+        .then((users) => {
+          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+          updateTopBarVisitors(valid.length);
+          const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
+          const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+
+          valid.forEach((u) => {
+            const isMe = u.id === userId;
+            const key = u.id;
+            const skinId = (u.skin && String(u.skin).trim()) || 'red';
+            userSkinsCache.set(key, skinId);
+            const displayName = u.username || (isMe ? 'Me' : 'Guest');
+            const visits = typeof u.visits === 'number' ? u.visits : 1;
+            const popupHtml = getPopupHtml(displayName, visits, isMe);
+            const isTopScorer = topScorerIds.has(key);
+            if (isMe) {
+              myVisits = visits;
+              myLng = u.lng;
+              amTopScorer = isTopScorer;
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, currentSkin);
+              if (userMarker) {
+                userMarker.setLatLng([u.lat, u.lng]);
+                userMarker.setPopupContent(popupHtml);
+                userMarker.setIcon(meIcon);
+              } else {
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
+                  .addTo(map)
+                  .bindPopup(popupHtml);
+                map.setView([u.lat, u.lng], 6);
+              }
+            } else {
+              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId);
+              if (otherMarkers.has(key)) {
+                const marker = otherMarkers.get(key);
+                marker.setLatLng([u.lat, u.lng]);
+                marker.setPopupContent(popupHtml);
+                marker.setIcon(icon);
+              } else {
+                const m = L.marker([u.lat, u.lng], { title: displayName, icon })
+                  .addTo(map)
+                  .bindPopup(popupHtml);
+                otherMarkers.set(key, m);
+              }
+            }
+          });
+          if (typeof renderSkinList === 'function') renderSkinList();
+        })
+        .catch((err) => {
+          console.error('Error while loading positions:', err);
+        });
+      loadLeaderboard();
+      loadLastJoined();
+      loadTopScores();
+    }
+
+    // Refresh only new points (does not affect existing markers)
+    function loadNewPositionsOnly() {
+      fetch('/api/positions')
+        .then((res) => res.json())
+        .then((users) => {
+          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+          updateTopBarVisitors(valid.length);
+          const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
+          const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+
+          valid.forEach((u) => {
+            const isMe = u.id === userId;
+            const key = u.id;
+            const skinId = (u.skin && String(u.skin).trim()) || 'red';
+            userSkinsCache.set(key, skinId);
+            const displayName = u.username || (isMe ? 'Me' : 'Guest');
+            const visits = typeof u.visits === 'number' ? u.visits : 1;
+            const popupHtml = getPopupHtml(displayName, visits, isMe);
+            const isTopScorer = topScorerIds.has(key);
+            if (isMe) {
+              myVisits = visits;
+              myLng = u.lng;
+              amTopScorer = isTopScorer;
+              if (userMarker) return; // already shown, don't touch
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, currentSkin);
+              userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
+                .addTo(map)
+                .bindPopup(popupHtml);
+              map.setView([u.lat, u.lng], 6);
+            } else {
+              if (otherMarkers.has(key)) return; // déjà affiché, on ne touche pas
+              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId);
+              const m = L.marker([u.lat, u.lng], { title: displayName, icon })
+                .addTo(map)
+                .bindPopup(popupHtml);
+              otherMarkers.set(key, m);
+            }
+          });
+        })
+        .catch((err) => {
+          console.error('Error while loading new positions:', err);
+        });
+      loadLastJoined();
+      loadTopScores();
+    }
+
+    function loadLeaderboard() {
+      fetch(`/api/leaderboard?userId=${encodeURIComponent(userId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          const list = document.getElementById('leaderboard-list');
+          if (!list) return;
+          const rows = data.rows || [];
+          const you = data.you || null;
+          if (rows.length === 0 && !you) {
+            list.innerHTML = '<li class="leaderboard-item">No data yet</li>';
+            return;
+          }
+          const youInTop10 = you && rows.some((r) => r.country === you.country);
+          let html = rows
+            .map((r, i) => {
+              const isYou = you && r.country === you.country;
+              const cls = isYou ? 'leaderboard-item is-you' : 'leaderboard-item';
+              return `<li class="${cls}"><span class="rank">${i + 1}.</span><span>${r.country}</span><span class="count">${r.count}</span></li>`;
+            })
+            .join('');
+          if (you && !youInTop10 && you.country) {
+            html += `<li class="leaderboard-item is-you you-row"><span class="rank">You</span><span>${you.country}</span><span class="count">${you.count}</span></li>`;
+          }
+          list.innerHTML = html;
+        })
+        .catch(() => {
+          const list = document.getElementById('leaderboard-list');
+          if (list) list.innerHTML = '<li class="leaderboard-item">—</li>';
+        });
+    }
+
+    // Get my current position and send it
+    function initGeolocationAndSync() {
+      if (!('geolocation' in navigator)) {
+        alert("Your browser does not support geolocation.");
+        loadAllPositions();
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          try {
+            await sendPosition(lat, lng);
+          } catch (e) {
+            console.error('Error while sending position:', e);
+          }
+          loadAllPositions();
+        },
+        (err) => {
+          console.error('Geolocation error:', err);
+          alert("Unable to get your position (check permissions).");
+          loadAllPositions(); // at least see others
+        }
+      );
+    }
+
+    // Name handling: block access until it is defined
+    function setupPseudoOverlay() {
+      const overlay = document.getElementById('pseudo-overlay');
+      const input = document.getElementById('pseudo-input');
+      const button = document.getElementById('pseudo-button');
+      const error = document.getElementById('pseudo-error');
+
+      function trySetPseudo() {
+        const value = (input.value || '').trim();
+        if (!value) {
+          error.textContent = 'Name is required.';
+          return;
+        }
+        username = value.slice(0, 40);
+        localStorage.setItem('username', username);
+        overlay.style.display = 'none';
+        error.textContent = '';
+        // loadAllPositions() called once in geoloc callback (success or error)
+        initGeolocationAndSync();
+      }
+
+      button.addEventListener('click', trySetPseudo);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          trySetPseudo();
+        }
+      });
+    }
+
+    // Global initialization: check if a name is already stored
+    function initApp() {
+      const stored = localStorage.getItem('username');
+      const overlay = document.getElementById('pseudo-overlay');
+
+      setupPseudoOverlay();
+
+      if (stored && stored.trim()) {
+        username = stored.trim().slice(0, 40);
+        overlay.style.display = 'none';
+        // loadAllPositions() called once in geoloc callback (success or error)
+        initGeolocationAndSync();
+      } else {
+        overlay.style.display = 'flex';
+      }
+    }
+
+    initApp();
+
+    // Leaderboard expandable: click title to open/close
+    (function setupLeaderboardToggle() {
+      const board = document.getElementById('leaderboard');
+      if (!board) return;
+      board.addEventListener('click', () => board.classList.toggle('is-collapsed'));
+    })();
+
+    // Next point panel: header expands/collapses explanation
+    (function setupNextPointPanel() {
+      const panel = document.getElementById('next-point-timer');
+      if (!panel) return;
+      panel.addEventListener('click', () => panel.classList.toggle('is-collapsed'));
+    })();
+
+    // Last joined: header expands/collapses list
+    (function setupLastJoinedToggle() {
+      const panel = document.getElementById('last-joined');
+      const header = document.getElementById('last-joined-header');
+      if (!panel || !header) return;
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.toggle('is-collapsed');
+      });
+    })();
+
+    // Top scores: header expands/collapses list
+    (function setupTopScoresToggle() {
+      const panel = document.getElementById('top-scores');
+      const header = document.getElementById('top-scores-header');
+      if (!panel || !header) return;
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.toggle('is-collapsed');
+      });
+    })();
+
+    // Collapsibles: desktop ouverts par défaut, mobile repliés
+    (function setupInitialPanelsState() {
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      const panels = [
+        document.getElementById('leaderboard'),
+        document.getElementById('last-joined'),
+        document.getElementById('top-scores')
+      ];
+      panels.forEach((el) => {
+        if (!el) return;
+        if (isMobile) {
+          el.classList.add('is-collapsed');
+        } else {
+          el.classList.remove('is-collapsed');
+        }
+      });
+      // Next point panel: toujours replié par défaut, même sur PC
+      const nextPointPanel = document.getElementById('next-point-timer');
+      if (nextPointPanel) nextPointPanel.classList.add('is-collapsed');
+    })();
+
+    // Skin panel on the right: list + selection (everyone sees the skin)
+    function renderSkinList() {
+      const list = document.getElementById('skin-list');
+      if (!list) return;
+      const score = myVisits;
+      let html = '';
+      if (amTopScorer) {
+        html += `<li class="skin-item-top-scorer"><span class="skin-top-scorer-star">★</span><span class="skin-item-name">#1 · Top score</span></li>`;
+      }
+      // 1) Skins de base (sans BLACKED)
+      html += SKINS.filter((s) => s.id !== 'blacked').map((s) => {
+        const active = s.id === currentSkin ? ' is-active' : '';
+        const locked = !canUseSkin(s.id, score);
+        const lockClass = locked ? ' is-locked' : '';
+        const reqLabel = getSkinRequirementLabel(s);
+        const reqHtml = reqLabel ? `<span class="skin-item-requirement">${escapeHtml(reqLabel)}</span>` : '';
+        const title = reqLabel ? `${s.name} — ${reqLabel}` : s.name;
+        let dotStyle = '';
+        let dotClass = 'skin-item-dot';
+        if (s.type === 'pattern' && s.pattern) {
+          dotClass += ` pattern-${s.pattern}`;
+        } else {
+          dotStyle = s.hex ? ` style="background: ${s.hex}"` : '';
+        }
+        return `<li class="skin-item${active}${lockClass}" data-skin-id="${escapeHtml(s.id)}" data-locked="${locked}" title="${escapeHtml(title)}"><span class="${dotClass}"${dotStyle}></span><span class="skin-item-name">${escapeHtml(s.name)}</span>${reqHtml}</li>`;
+      }).join('');
+      // 2) Skins image (Drone, Spiral, etc.)
+      fixedImageSkins.forEach((s) => {
+        const isPaidLocked = PAID_SKIN_IDS.includes(s.id) && !unlockedExternalSkins.includes(s.id);
+        const locked = isPaidLocked;
+        const lockClass = locked ? ' is-locked' : '';
+        const active = s.id === currentSkin ? ' is-active' : '';
+        const dotStyle = ` style="background-image:url(${String(s.imageUrl).replace(/"/g, '&quot;').replace(/'/g, '%27')});background-size:cover;background-color:#334155"`;
+        const reqLabel = isPaidLocked ? (PAID_SKIN_LABELS[s.id] || '5 €') : '';
+        const reqHtml = reqLabel ? `<span class="skin-item-requirement">${escapeHtml(reqLabel)}</span>` : '';
+        const title = reqLabel ? `${s.name} — ${reqLabel}` : s.name;
+        html += `<li class="skin-item${active}${lockClass}" data-skin-id="${escapeHtml(s.id)}" data-locked="${locked}" data-external-unlock="${s.id === 'Drone' && locked ? 'drone' : ''}" title="${escapeHtml(title)}"><span class="skin-item-dot"${dotStyle}></span><span class="skin-item-name">${escapeHtml(s.name)}</span>${reqHtml}</li>`;
+      });
+      // 3) BLACKED tout en bas
+      const blacked = SKINS.find((s) => s.id === 'blacked');
+      if (blacked) {
+        const active = blacked.id === currentSkin ? ' is-active' : '';
+        const locked = !canUseSkin(blacked.id, score);
+        const lockClass = locked ? ' is-locked' : '';
+        const reqLabel = getSkinRequirementLabel(blacked);
+        const reqHtml = reqLabel ? `<span class="skin-item-requirement">${escapeHtml(reqLabel)}</span>` : '';
+        const title = reqLabel ? `${blacked.name} — ${reqLabel}` : blacked.name;
+        let dotStyle = '';
+        let dotClass = 'skin-item-dot';
+        if (blacked.type === 'pattern' && blacked.pattern) {
+          dotClass += ` pattern-${blacked.pattern}`;
+        } else {
+          dotStyle = blacked.hex ? ` style="background: ${blacked.hex}"` : '';
+        }
+        html += `<li class="skin-item${active}${lockClass}" data-skin-id="${escapeHtml(blacked.id)}" data-locked="${locked}" title="${escapeHtml(title)}"><span class="${dotClass}"${dotStyle}></span><span class="skin-item-name">${escapeHtml(blacked.name)}</span>${reqHtml}</li>`;
+      }
+      list.innerHTML = html;
+    }
+    function setupSkinPanel() {
+      const panel = document.getElementById('skin-panel');
+      const toggle = document.getElementById('skin-panel-toggle');
+      const list = document.getElementById('skin-list');
+      if (!panel || !toggle) return;
+      toggle.addEventListener('click', () => panel.classList.toggle('is-collapsed'));
+      function loadSkins() {
+        fetch(`/api/skins?userId=${encodeURIComponent(userId)}`).then((r) => r.json()).then((data) => {
+          fixedImageSkins = data.fixedImageSkins || [];
+          unlockedExternalSkins = data.unlockedExternalSkins || [];
+          renderSkinList();
+        }).catch(() => { fixedImageSkins = []; unlockedExternalSkins = []; renderSkinList(); });
+      }
+      loadSkins();
+      list.addEventListener('click', (e) => {
+        const item = e.target.closest('.skin-item');
+        if (!item) return;
+        const id = item.getAttribute('data-skin-id');
+        if (!id) return;
+        // Skins payants: clic ouvre la page externe, ils restent verrouillés
+        if (id === 'blacked' || id === 'Spiral') {
+          window.open('https://www.julie.click/', '_blank');
+          return;
+        }
+        // Drone : flux externe
+        if (id === 'Drone' && !unlockedExternalSkins.includes('Drone')) {
+          window.open('https://juliemommy.pythonanywhere.com', '_blank');
+          setTimeout(function() {
+            fetch('/api/unlock-drone', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: userId })
+            }).then(function() { loadSkins(); }).catch(function() { loadSkins(); });
+          }, 20000);
+          return;
+        }
+        if (item.getAttribute('data-locked') === 'true') return;
+        const previousSkin = currentSkin;
+        currentSkin = id;
+        localStorage.setItem('skin', id);
+        renderSkinList();
+        if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin));
+        fetch('/api/set-skin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, skin: id })
+        }).then((res) => {
+          if (res.ok) return res.json();
+          return res.json().then(() => {
+            if (res.status === 403) {
+              currentSkin = previousSkin;
+              localStorage.setItem('skin', currentSkin);
+              renderSkinList();
+              if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin));
+            }
+          }).catch(() => {});
+        }).catch(() => {
+          // Erreur réseau ou serveur : on garde le nouveau skin en local (pas de revert)
+        });
+      });
+    }
+    setupSkinPanel();
+
+    // Single refresh every 1 min (avoids duplicates and overlap with loadNewPositionsOnly)
+    setInterval(loadAllPositions, 60000);
+  </script>
+</body>
+</html>
+
