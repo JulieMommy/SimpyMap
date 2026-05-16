@@ -2,11 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
 const countries = require('i18n-iso-countries');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+import pool from './db.js';     // ← Garde ou ajoute cette ligne
 
 const { Pool } = require('pg');
 
@@ -16,8 +17,6 @@ const pool = new Pool({
     rejectUnauthorized: false
   }
 });
-
-const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Serveur lancé");
@@ -31,9 +30,6 @@ const DRONE_EXTERNAL_BASE = 'https://juliemommy.pythonanywhere.com';
 const EXTERNAL_UNLOCK_SKIN_ID = 'Drone';
 // Skins affichés comme payants (verrouillés avec "5 €" sauf Drone qui a son propre flux)
 const PAID_SKINS = ['Drone', 'blacked', 'Spiral'];
-
-// DB SQLite
-const db = new sqlite3.Database(path.join(__dirname, 'data.db'));
 
 app.get('/api/drone-url', (req, res) => {
   res.json({ url: `${DRONE_EXTERNAL_BASE}/update` });
