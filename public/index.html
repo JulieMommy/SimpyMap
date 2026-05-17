@@ -1176,7 +1176,8 @@
     }
 
     async function tryEarnPointWhenReady() {
-      if (earnSyncInFlight || !username || nextPointAt || pointsFrozen) return;
+      if (earnSyncInFlight || !username || pointsFrozen) return;
+      if (nextPointAt && nextPointAt !== 'frozen') return;
       if (typeof myLat !== 'number' || typeof myLng !== 'number') return;
       earnSyncInFlight = true;
       try {
@@ -1185,7 +1186,7 @@
           myVisits = typeof data.visits === 'number' ? data.visits : myVisits;
         }
         await fetchNextPoint();
-        loadAllPositions();
+        await loadAllPositions({ skipEarnAttempt: true });
       } catch (e) {
         console.error('tryEarnPointWhenReady:', e);
       } finally {
@@ -1209,6 +1210,10 @@
       }
       el.classList.remove('available');
       const target = new Date(nextPointAt).getTime();
+      if (!Number.isFinite(target)) {
+        fetchNextPoint();
+        return;
+      }
       const now = Date.now();
       const ms = Math.max(0, target - now);
       if (ms <= 0) {
@@ -1361,15 +1366,23 @@
     let positionsRefreshTimer = null;
     function schedulePositionsRefresh() {
       if (positionsRefreshTimer) clearInterval(positionsRefreshTimer);
-      positionsRefreshTimer = setInterval(loadAllPositions, positionsRefreshMs);
+      positionsRefreshTimer = setInterval(() => loadAllPositions({ skipEarnAttempt: true }), positionsRefreshMs);
+    }
+
+    function refreshSidePanels() {
+      loadLeaderboard();
+      loadLastJoined();
+      loadTopScores();
     }
 
     // Load all positions from server
-    function loadAllPositions() {
+    function loadAllPositions(options) {
+      const skipEarnAttempt = options && options.skipEarnAttempt === true;
       return fetch('/api/positions')
         .then((res) => res.json())
         .then((users) => {
-          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+          const list = Array.isArray(users) ? users : [];
+          const valid = list.filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
           const meRow = valid.find((u) => u.id === userId);
           const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
           if (meManual) pointsFrozen = true;
@@ -1434,14 +1447,12 @@
             }
           });
           if (typeof renderSkinList === 'function') renderSkinList();
-          if (!pointsFrozen && !nextPointAt) tryEarnPointWhenReady();
+          if (!skipEarnAttempt) tryEarnPointWhenReady();
         })
         .catch((err) => {
           console.error('Error while loading positions:', err);
         });
-      loadLeaderboard();
-      loadLastJoined();
-      loadTopScores();
+      refreshSidePanels();
     }
 
     // Refresh only new points (does not affect existing markers)
@@ -1503,8 +1514,7 @@
         .catch((err) => {
           console.error('Error while loading new positions:', err);
         });
-      loadLastJoined();
-      loadTopScores();
+      refreshSidePanels();
     }
 
     function loadLeaderboard() {
@@ -1566,13 +1576,13 @@
           } catch (e) {
             console.error('Error while sending position:', e);
           }
-          loadAllPositions();
+          loadAllPositions({ skipEarnAttempt: true });
         },
         (err) => {
           console.error('Geolocation error:', err);
           if (!isAnonymous) alert("Unable to get your position (check permissions).");
           afterPositions.then(() => tryEarnPointWhenReady());
-          loadAllPositions();
+          loadAllPositions({ skipEarnAttempt: true });
         }
       );
       return afterPositions;
