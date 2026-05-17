@@ -164,6 +164,15 @@ async function waitNominatimSlot() {
   lastNominatimAt = Date.now();
 }
 
+function parsePlaceFromNominatim(data) {
+  const addr = (data && data.address) ? data.address : {};
+  return {
+    country: addr.country || 'Unknown',
+    countryCode: (addr.country_code || '').toUpperCase(),
+    city: addr.city || addr.town || addr.village || addr.municipality || addr.county || ''
+  };
+}
+
 function fetchPlace(lat, lng) {
   const key = getCacheKey(lat, lng);
   if (placeCache.has(key)) return Promise.resolve(placeCache.get(key));
@@ -173,38 +182,58 @@ function fetchPlace(lat, lng) {
   )
     .then((r) => r.json())
     .then((data) => {
-      const addr = (data && data.address) ? data.address : {};
-      const country = addr.country || 'Unknown';
-      const countryCode = (addr.country_code || '').toUpperCase();
-      const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
-      const place = { country, countryCode, city };
+      const place = parsePlaceFromNominatim(data);
       placeCache.set(key, place);
       return place;
     })
     .catch(() => ({ country: 'Unknown', countryCode: '', city: '' }));
 }
 
-async function getCountryBoundingBox(countryName) {
-  const name = (countryName || '').trim();
-  if (!name || name === 'Unknown') return null;
-  if (countryBboxCache.has(name)) return countryBboxCache.get(name);
+/** Reverse geocode without cache — used to validate random candidates. */
+async function fetchPlaceFresh(lat, lng) {
   await waitNominatimSlot();
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?country=${encodeURIComponent(name)}&format=json&limit=1`,
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
       { headers: { 'User-Agent': 'Juliemap/1.0', 'Accept-Language': 'en' } }
     );
     const data = await res.json();
-    const hit = Array.isArray(data) && data[0] ? data[0] : null;
+    return parsePlaceFromNominatim(data);
+  } catch (e) {
+    console.warn('fetchPlaceFresh:', e.message);
+    return { country: 'Unknown', countryCode: '', city: '' };
+  }
+}
+
+async function getCountryBoundingBox(countryName, countryCode) {
+  const code = (countryCode || '').trim().toUpperCase();
+  const name = (countryName || '').trim();
+  if (!name || name === 'Unknown') return null;
+  const cacheKey = code || name;
+  if (countryBboxCache.has(cacheKey)) return countryBboxCache.get(cacheKey);
+  await waitNominatimSlot();
+  try {
+    let url =
+      `https://nominatim.openstreetmap.org/search?format=json&limit=5&featuretype=country&country=${encodeURIComponent(name)}`;
+    if (code) url += `&countrycodes=${encodeURIComponent(code.toLowerCase())}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Juliemap/1.0', 'Accept-Language': 'en' }
+    });
+    const data = await res.json();
+    const hits = Array.isArray(data) ? data : [];
+    const hit =
+      hits.find((h) => code && (h.country_code || '').toUpperCase() === code) ||
+      hits.find((h) => String(h.type || '').toLowerCase() === 'country') ||
+      hits[0];
     const bbox = hit && hit.boundingbox ? hit.boundingbox.map(Number) : null;
     if (bbox && bbox.length === 4 && bbox.every((n) => Number.isFinite(n))) {
-      countryBboxCache.set(name, bbox);
+      countryBboxCache.set(cacheKey, bbox);
       return bbox;
     }
   } catch (e) {
     console.warn('getCountryBoundingBox:', e.message);
   }
-  countryBboxCache.set(name, null);
+  countryBboxCache.set(cacheKey, null);
   return null;
 }
 
@@ -216,30 +245,93 @@ function randomLatLngInBbox(bbox) {
   };
 }
 
-/** Pick a random point inside the user's country (from real GPS); fallback: small jitter around GPS. */
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function maxRadiusKmForCountry(bbox) {
+  if (!bbox) return 450;
+  const [south, north, west, east] = bbox;
+  const midLat = (south + north) / 2;
+  const heightKm = Math.abs(north - south) * 111;
+  const widthKm = Math.abs(east - west) * 111 * Math.cos((midLat * Math.PI) / 180);
+  return Math.min(2800, Math.max(180, Math.max(heightKm, widthKm) * 0.6));
+}
+
+function isSameCountry(place, targetCode, targetCountry) {
+  if (targetCode && place.countryCode === targetCode) return true;
+  if (!targetCode && targetCountry && place.country === targetCountry) return true;
+  return false;
+}
+
+function isCandidateAllowed(realLat, realLng, lat, lng, targetCode, targetCountry, bbox) {
+  if (!isFinite(lat) || !isFinite(lng)) return false;
+  const maxKm = maxRadiusKmForCountry(bbox);
+  if (haversineKm(realLat, realLng, lat, lng) > maxKm) return false;
+  if (bbox) {
+    const [south, north, west, east] = bbox;
+    if (lat < south || lat > north) return false;
+    if (west <= east) {
+      if (lng < west || lng > east) return false;
+    } else if (lng > east && lng < west) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function tryAcceptCandidate(realLat, realLng, lat, lng, targetCode, targetCountry, bbox) {
+  if (!isCandidateAllowed(realLat, realLng, lat, lng, targetCode, targetCountry, bbox)) {
+    return null;
+  }
+  const check = await fetchPlaceFresh(lat, lng);
+  if (!isSameCountry(check, targetCode, targetCountry)) return null;
+  return { lat, lng, country: targetCountry, city: '' };
+}
+
+/** Random point guaranteed (by reverse geocode) to stay in the user's country. */
 async function randomPointInCountry(realLat, realLng) {
   const place = await fetchPlace(realLat, realLng);
-  const bbox = await getCountryBoundingBox(place.country);
-  if (!bbox) {
-    const jitter = 0.35 + Math.random() * 0.9;
-    const angle = Math.random() * Math.PI * 2;
-    return {
-      lat: realLat + Math.cos(angle) * jitter,
-      lng: realLng + Math.sin(angle) * jitter,
-      country: place.country,
-      city: ''
-    };
+  const targetCode = place.countryCode;
+  const targetCountry = place.country;
+  if (!targetCode && (!targetCountry || targetCountry === 'Unknown')) {
+    return { lat: realLat, lng: realLng, country: 'Unknown', city: '' };
   }
-  for (let i = 0; i < 5; i++) {
-    const { lat, lng } = randomLatLngInBbox(bbox);
-    const check = await fetchPlace(lat, lng);
-    if (check.country === place.country || (place.countryCode && check.countryCode === place.countryCode)) {
-      return { lat, lng, country: place.country, city: '' };
+
+  const bbox = await getCountryBoundingBox(targetCountry, targetCode);
+  const maxKm = maxRadiusKmForCountry(bbox);
+
+  if (bbox) {
+    for (let i = 0; i < 15; i++) {
+      const { lat, lng } = randomLatLngInBbox(bbox);
+      const accepted = await tryAcceptCandidate(
+        realLat, realLng, lat, lng, targetCode, targetCountry, bbox
+      );
+      if (accepted) return accepted;
     }
-    await waitNominatimSlot();
   }
-  const { lat, lng } = randomLatLngInBbox(bbox);
-  return { lat, lng, country: place.country, city: '' };
+
+  for (let i = 0; i < 12; i++) {
+    const distKm = 15 + Math.random() * Math.min(maxKm * 0.85, 750);
+    const angle = Math.random() * Math.PI * 2;
+    const dLat = (distKm / 111) * Math.cos(angle);
+    const dLng = (distKm / (111 * Math.cos((realLat * Math.PI) / 180))) * Math.sin(angle);
+    const lat = realLat + dLat;
+    const lng = realLng + dLng;
+    const accepted = await tryAcceptCandidate(
+      realLat, realLng, lat, lng, targetCode, targetCountry, bbox
+    );
+    if (accepted) return accepted;
+  }
+
+  console.warn('randomPointInCountry: fallback to approximate GPS for', targetCode || targetCountry);
+  return { lat: realLat, lng: realLng, country: targetCountry, city: '' };
 }
 
 function isManualOverrideRow(row) {
@@ -277,6 +369,53 @@ function getNextPointAtUtc(todayYYYYMMDD) {
   return next.toISOString();
 }
 
+/** Wait after point 1→2, 2→3, 3→4, 4→5 (ms). From 5 points onward: daily UTC. */
+const EARLY_POINT_DELAYS_MS = [
+  5 * 60 * 1000,
+  10 * 60 * 1000,
+  15 * 60 * 1000,
+  60 * 60 * 1000
+];
+
+function effectiveLastPointEarnedAt(row) {
+  if (!row) return null;
+  if (row.lastPointEarnedAt) return String(row.lastPointEarnedAt);
+  if (row.updatedAt) return String(row.updatedAt);
+  if (row.createdAt) return String(row.createdAt);
+  return null;
+}
+
+function canEarnPointNow(visits, lastPointEarnedAt, lastVisitDate, today) {
+  const v = typeof visits === 'number' ? visits : 0;
+  if (v >= 5) {
+    const lastDate = lastVisitDate ? String(lastVisitDate).slice(0, 10) : '';
+    return lastDate !== today;
+  }
+  if (v === 0) return true;
+  if (!lastPointEarnedAt) return true;
+  const earned = new Date(lastPointEarnedAt).getTime();
+  if (!Number.isFinite(earned)) return true;
+  const delay = EARLY_POINT_DELAYS_MS[Math.min(v - 1, EARLY_POINT_DELAYS_MS.length - 1)];
+  return Date.now() >= earned + delay;
+}
+
+function computeNextPointAt(visits, lastPointEarnedAt, lastVisitDate, today) {
+  const v = typeof visits === 'number' ? visits : 0;
+  if (v >= 5) {
+    const lastDate = lastVisitDate ? String(lastVisitDate).slice(0, 10) : '';
+    if (lastDate === today) return getNextPointAtUtc(today);
+    return null;
+  }
+  if (v === 0) return null;
+  if (!lastPointEarnedAt) return null;
+  const earned = new Date(lastPointEarnedAt).getTime();
+  if (!Number.isFinite(earned)) return null;
+  const delay = EARLY_POINT_DELAYS_MS[Math.min(v - 1, EARLY_POINT_DELAYS_MS.length - 1)];
+  const nextMs = earned + delay;
+  if (Date.now() >= nextMs) return null;
+  return new Date(nextMs).toISOString();
+}
+
 app.post('/api/position', async (req, res) => {
   const { userId, lat, lng, username, skin, anonymous } = req.body;
 
@@ -293,14 +432,16 @@ app.post('/api/position', async (req, res) => {
 
   try {
     const { rows: existing } = await pool.query(
-      `SELECT visits, skin, "lastVisitDate", "manualOverride", "anonymousLocation", lat, lng, country, city
+      `SELECT visits, skin, "lastVisitDate", "lastPointEarnedAt", "createdAt", "manualOverride",
+              "anonymousLocation", lat, lng, country, city
        FROM users WHERE id = $1`,
       [userId]
     );
     const row = existing[0] || null;
     if (isManualOverrideRow(row)) {
+      const lastEarned = effectiveLastPointEarnedAt(row);
       const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-      const nextPointAt = lastDate === today ? getNextPointAtUtc(today) : null;
+      const nextPointAt = computeNextPointAt(row.visits, lastEarned, lastDate, today);
       return res.json({ ok: true, manualOverride: true, nextPointAt });
     }
 
@@ -338,40 +479,76 @@ app.post('/api/position', async (req, res) => {
 
     const currentVisits = row && typeof row.visits === 'number' ? row.visits : 0;
     const lastDate = row && row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const newVisits = lastDate === today ? currentVisits : currentVisits + 1;
+    const lastEarned = effectiveLastPointEarnedAt(row);
+    const canEarn = canEarnPointNow(currentVisits, lastEarned, lastDate, today);
+    const visitsToStore = row ? (canEarn ? currentVisits + 1 : currentVisits) : 1;
+    const lastPointEarnedAtToStore = canEarn || !row ? now : row.lastPointEarnedAt || null;
+    let lastVisitDateToStore = lastDate || '';
+    if (canEarn || !row) {
+      if (visitsToStore >= 5) lastVisitDateToStore = today;
+      else if (visitsToStore >= 1) lastVisitDateToStore = today;
+    }
+
     const previousSkin = row && row.skin != null ? String(row.skin).trim() : null;
+    const scoreForSkin = visitsToStore;
 
     let skinToUse = cleanSkin;
     if (cleanSkin && PAID_SKINS.includes(cleanSkin)) {
-      const ok = await canUseSkin(cleanSkin, newVisits, userId);
+      const ok = await canUseSkin(cleanSkin, scoreForSkin, userId);
       skinToUse = ok ? cleanSkin : (previousSkin || null);
     } else if (cleanSkin) {
-      const ok = await canUseSkin(cleanSkin, newVisits, userId);
+      const ok = await canUseSkin(cleanSkin, scoreForSkin, userId);
       if (!ok) skinToUse = previousSkin || null;
     } else {
       skinToUse = previousSkin || null;
     }
 
     await pool.query(
-      `INSERT INTO users (id, lat, lng, username, visits, country, city, skin, "lastVisitDate", "createdAt", "updatedAt", "anonymousLocation")
-       VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $13)
+      `INSERT INTO users (id, lat, lng, username, visits, country, city, skin, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt", "anonymousLocation")
+       VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $14)
        ON CONFLICT (id) DO UPDATE SET
          lat = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lat ELSE EXCLUDED.lat END,
          lng = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lng ELSE EXCLUDED.lng END,
          username = EXCLUDED.username,
-         visits = CASE WHEN COALESCE(users."lastVisitDate", '') = $11 THEN users.visits ELSE users.visits + 1 END,
+         visits = $12,
          country = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.country ELSE EXCLUDED.country END,
          city = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.city ELSE EXCLUDED.city END,
          skin = COALESCE(EXCLUDED.skin, users.skin),
-         "lastVisitDate" = CASE WHEN COALESCE(users."lastVisitDate", '') = $11 THEN users."lastVisitDate" ELSE $12 END,
+         "lastVisitDate" = $13,
+         "lastPointEarnedAt" = $15,
          "updatedAt" = EXCLUDED."updatedAt",
          "anonymousLocation" = COALESCE(users."anonymousLocation", EXCLUDED."anonymousLocation")`,
-      [userId, latUse, lngUse, cleanUsername, country, city, skinToUse, today, now, now, today, today, setAnonymous]
+      [
+        userId,
+        latUse,
+        lngUse,
+        cleanUsername,
+        country,
+        city,
+        skinToUse,
+        lastVisitDateToStore,
+        now,
+        now,
+        now,
+        visitsToStore,
+        lastVisitDateToStore,
+        setAnonymous,
+        lastPointEarnedAtToStore
+      ]
+    );
+
+    const nextPointAt = computeNextPointAt(
+      visitsToStore,
+      lastPointEarnedAtToStore,
+      lastVisitDateToStore,
+      today
     );
 
     res.json({
       ok: true,
-      nextPointAt: getNextPointAtUtc(today),
+      pointEarned: canEarn || !row,
+      nextPointAt,
+      visits: visitsToStore,
       anonymousLocation: alreadyAnonymous || setAnonymous,
       lat: latUse,
       lng: lngUse
@@ -387,11 +564,17 @@ app.get('/api/next-point', async (req, res) => {
   if (!userId) return res.status(400).json({ error: 'userId required' });
   const today = new Date().toISOString().slice(0, 10);
   try {
-    const { rows } = await pool.query('SELECT "lastVisitDate" FROM users WHERE id = $1', [userId]);
+    const { rows } = await pool.query(
+      `SELECT visits, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt" FROM users WHERE id = $1`,
+      [userId]
+    );
     const row = rows[0];
-    const lastDate = row && row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const nextPointAt = lastDate === today ? getNextPointAtUtc(today) : null;
-    res.json({ nextPointAt });
+    if (!row) return res.json({ nextPointAt: null, visits: 0 });
+    const visits = typeof row.visits === 'number' ? row.visits : 0;
+    const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
+    const lastEarned = effectiveLastPointEarnedAt(row);
+    const nextPointAt = computeNextPointAt(visits, lastEarned, lastDate, today);
+    res.json({ nextPointAt, visits });
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
