@@ -377,12 +377,10 @@ const EARLY_POINT_DELAYS_MS = [
   60 * 60 * 1000
 ];
 
-function effectiveLastPointEarnedAt(row) {
-  if (!row) return null;
-  if (row.lastPointEarnedAt) return String(row.lastPointEarnedAt);
-  if (row.updatedAt) return String(row.updatedAt);
-  if (row.createdAt) return String(row.createdAt);
-  return null;
+function getLastPointEarnedAt(row) {
+  if (!row || !row.lastPointEarnedAt) return null;
+  const t = String(row.lastPointEarnedAt).trim();
+  return t || null;
 }
 
 function canEarnPointNow(visits, lastPointEarnedAt, lastVisitDate, today) {
@@ -438,13 +436,7 @@ app.post('/api/position', async (req, res) => {
       [userId]
     );
     const row = existing[0] || null;
-    if (isManualOverrideRow(row)) {
-      const lastEarned = effectiveLastPointEarnedAt(row);
-      const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-      const nextPointAt = computeNextPointAt(row.visits, lastEarned, lastDate, today);
-      return res.json({ ok: true, manualOverride: true, nextPointAt });
-    }
-
+    const manualOverride = isManualOverrideRow(row);
     const alreadyAnonymous = row && (row.anonymousLocation === true || row.anonymousLocation === 't');
     const hasStoredPosition =
       row && typeof row.lat === 'number' && typeof row.lng === 'number' && Number.isFinite(row.lat);
@@ -455,7 +447,7 @@ app.post('/api/position', async (req, res) => {
     let city = '';
     let setAnonymous = false;
 
-    if (alreadyAnonymous && hasStoredPosition) {
+    if ((alreadyAnonymous || manualOverride) && hasStoredPosition) {
       latUse = row.lat;
       lngUse = row.lng;
       country = row.country || 'Unknown';
@@ -479,14 +471,27 @@ app.post('/api/position', async (req, res) => {
 
     const currentVisits = row && typeof row.visits === 'number' ? row.visits : 0;
     const lastDate = row && row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const lastEarned = effectiveLastPointEarnedAt(row);
-    const canEarn = canEarnPointNow(currentVisits, lastEarned, lastDate, today);
-    const visitsToStore = row ? (canEarn ? currentVisits + 1 : currentVisits) : 1;
-    const lastPointEarnedAtToStore = canEarn || !row ? now : row.lastPointEarnedAt || null;
-    let lastVisitDateToStore = lastDate || '';
-    if (canEarn || !row) {
-      if (visitsToStore >= 5) lastVisitDateToStore = today;
-      else if (visitsToStore >= 1) lastVisitDateToStore = today;
+    const lastEarned = getLastPointEarnedAt(row);
+    const canEarn = manualOverride ? false : canEarnPointNow(currentVisits, lastEarned, lastDate, today);
+    let visitsToStore;
+    let lastPointEarnedAtToStore;
+    let lastVisitDateToStore;
+    if (manualOverride && row) {
+      visitsToStore = currentVisits;
+      lastPointEarnedAtToStore = row.lastPointEarnedAt || null;
+      lastVisitDateToStore = lastDate;
+    } else if (!row) {
+      visitsToStore = 1;
+      lastPointEarnedAtToStore = now;
+      lastVisitDateToStore = today;
+    } else {
+      visitsToStore = canEarn ? currentVisits + 1 : currentVisits;
+      lastPointEarnedAtToStore = canEarn ? now : row.lastPointEarnedAt || null;
+      lastVisitDateToStore = lastDate || '';
+      if (canEarn) {
+        if (visitsToStore >= 5) lastVisitDateToStore = today;
+        else if (visitsToStore >= 1) lastVisitDateToStore = today;
+      }
     }
 
     const previousSkin = row && row.skin != null ? String(row.skin).trim() : null;
@@ -507,15 +512,15 @@ app.post('/api/position', async (req, res) => {
       `INSERT INTO users (id, lat, lng, username, visits, country, city, skin, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt", "anonymousLocation")
        VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $14)
        ON CONFLICT (id) DO UPDATE SET
-         lat = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lat ELSE EXCLUDED.lat END,
-         lng = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lng ELSE EXCLUDED.lng END,
+         lat = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users.lat WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lat ELSE EXCLUDED.lat END,
+         lng = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users.lng WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lng ELSE EXCLUDED.lng END,
          username = EXCLUDED.username,
-         visits = $12,
-         country = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.country ELSE EXCLUDED.country END,
-         city = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.city ELSE EXCLUDED.city END,
+         visits = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users.visits ELSE $12 END,
+         country = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users.country WHEN COALESCE(users."anonymousLocation", false) = true THEN users.country ELSE EXCLUDED.country END,
+         city = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users.city WHEN COALESCE(users."anonymousLocation", false) = true THEN users.city ELSE EXCLUDED.city END,
          skin = COALESCE(EXCLUDED.skin, users.skin),
-         "lastVisitDate" = $13,
-         "lastPointEarnedAt" = $15,
+         "lastVisitDate" = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users."lastVisitDate" ELSE $13 END,
+         "lastPointEarnedAt" = CASE WHEN COALESCE(users."manualOverride", false) = true THEN users."lastPointEarnedAt" ELSE $15 END,
          "updatedAt" = EXCLUDED."updatedAt",
          "anonymousLocation" = COALESCE(users."anonymousLocation", EXCLUDED."anonymousLocation")`,
       [
@@ -537,19 +542,18 @@ app.post('/api/position', async (req, res) => {
       ]
     );
 
-    const nextPointAt = computeNextPointAt(
-      visitsToStore,
-      lastPointEarnedAtToStore,
-      lastVisitDateToStore,
-      today
-    );
+    const nextPointAt = manualOverride
+      ? null
+      : computeNextPointAt(visitsToStore, lastPointEarnedAtToStore, lastVisitDateToStore, today);
 
     res.json({
       ok: true,
-      pointEarned: canEarn || !row,
+      pointEarned: !manualOverride && (canEarn || !row),
       nextPointAt,
       visits: visitsToStore,
+      pointsFrozen: !!manualOverride,
       anonymousLocation: alreadyAnonymous || setAnonymous,
+      manualOverride: !!manualOverride,
       lat: latUse,
       lng: lngUse
     });
@@ -565,16 +569,21 @@ app.get('/api/next-point', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   try {
     const { rows } = await pool.query(
-      `SELECT visits, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt" FROM users WHERE id = $1`,
+      `SELECT visits, "lastVisitDate", "lastPointEarnedAt", "manualOverride" FROM users WHERE id = $1`,
       [userId]
     );
     const row = rows[0];
-    if (!row) return res.json({ nextPointAt: null, visits: 0 });
+    if (!row) return res.json({ nextPointAt: null, visits: 0, canEarn: true, manualOverride: false });
     const visits = typeof row.visits === 'number' ? row.visits : 0;
+    const manualOverride = isManualOverrideRow(row);
+    if (manualOverride) {
+      return res.json({ nextPointAt: null, visits, canEarn: false, manualOverride: true, pointsFrozen: true });
+    }
     const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const lastEarned = effectiveLastPointEarnedAt(row);
+    const lastEarned = getLastPointEarnedAt(row);
     const nextPointAt = computeNextPointAt(visits, lastEarned, lastDate, today);
-    res.json({ nextPointAt, visits });
+    const canEarn = canEarnPointNow(visits, lastEarned, lastDate, today);
+    res.json({ nextPointAt, visits, canEarn, manualOverride: false, pointsFrozen: false });
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
