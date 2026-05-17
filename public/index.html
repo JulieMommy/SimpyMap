@@ -1176,8 +1176,7 @@
     }
 
     async function tryEarnPointWhenReady() {
-      if (earnSyncInFlight || !username || pointsFrozen) return;
-      if (nextPointAt && nextPointAt !== 'frozen') return;
+      if (earnSyncInFlight || !username || nextPointAt || pointsFrozen) return;
       if (typeof myLat !== 'number' || typeof myLng !== 'number') return;
       earnSyncInFlight = true;
       try {
@@ -1186,7 +1185,7 @@
           myVisits = typeof data.visits === 'number' ? data.visits : myVisits;
         }
         await fetchNextPoint();
-        await loadAllPositions({ skipEarnAttempt: true });
+        loadAllPositions();
       } catch (e) {
         console.error('tryEarnPointWhenReady:', e);
       } finally {
@@ -1210,10 +1209,6 @@
       }
       el.classList.remove('available');
       const target = new Date(nextPointAt).getTime();
-      if (!Number.isFinite(target)) {
-        fetchNextPoint();
-        return;
-      }
       const now = Date.now();
       const ms = Math.max(0, target - now);
       if (ms <= 0) {
@@ -1362,35 +1357,15 @@
       return div.innerHTML;
     }
 
-    let positionsRefreshMs = 60000;
-    let positionsRefreshTimer = null;
-    function schedulePositionsRefresh() {
-      if (positionsRefreshTimer) clearInterval(positionsRefreshTimer);
-      positionsRefreshTimer = setInterval(() => loadAllPositions({ skipEarnAttempt: true }), positionsRefreshMs);
-    }
-
-    function refreshSidePanels() {
-      loadLeaderboard();
-      loadLastJoined();
-      loadTopScores();
-    }
-
     // Load all positions from server
-    function loadAllPositions(options) {
-      const skipEarnAttempt = options && options.skipEarnAttempt === true;
+    function loadAllPositions() {
       return fetch('/api/positions')
         .then((res) => res.json())
         .then((users) => {
-          const list = Array.isArray(users) ? users : [];
-          const valid = list.filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
           const meRow = valid.find((u) => u.id === userId);
           const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
           if (meManual) pointsFrozen = true;
-          const nextMs = meManual ? 10000 : 60000;
-          if (nextMs !== positionsRefreshMs) {
-            positionsRefreshMs = nextMs;
-            schedulePositionsRefresh();
-          }
           updateTopBarVisitors(valid.length);
           const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
           const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
@@ -1447,12 +1422,13 @@
             }
           });
           if (typeof renderSkinList === 'function') renderSkinList();
-          if (!skipEarnAttempt) tryEarnPointWhenReady();
         })
         .catch((err) => {
           console.error('Error while loading positions:', err);
         });
-      refreshSidePanels();
+      loadLeaderboard();
+      loadLastJoined();
+      loadTopScores();
     }
 
     // Refresh only new points (does not affect existing markers)
@@ -1514,7 +1490,9 @@
         .catch((err) => {
           console.error('Error while loading new positions:', err);
         });
-      refreshSidePanels();
+      loadLeaderboard();
+      loadLastJoined();
+      loadTopScores();
     }
 
     function loadLeaderboard() {
@@ -1576,13 +1554,13 @@
           } catch (e) {
             console.error('Error while sending position:', e);
           }
-          loadAllPositions({ skipEarnAttempt: true });
+          loadAllPositions();
         },
         (err) => {
           console.error('Geolocation error:', err);
           if (!isAnonymous) alert("Unable to get your position (check permissions).");
           afterPositions.then(() => tryEarnPointWhenReady());
-          loadAllPositions({ skipEarnAttempt: true });
+          loadAllPositions();
         }
       );
       return afterPositions;
@@ -1611,8 +1589,8 @@
         }
         overlay.style.display = 'none';
         error.textContent = '';
-        // loadAllPositions() called once in geoloc callback (success or error)
         initGeolocationAndSync();
+        loadAllPositions();
       }
 
       button.addEventListener('click', trySetPseudo);
@@ -1633,8 +1611,8 @@
       if (stored && stored.trim()) {
         username = stored.trim().slice(0, 40);
         overlay.style.display = 'none';
-        // loadAllPositions() called once in geoloc callback (success or error)
         initGeolocationAndSync();
+        loadAllPositions();
       } else {
         overlay.style.display = 'flex';
       }
@@ -1820,7 +1798,9 @@
     }
     setupSkinPanel();
 
-    schedulePositionsRefresh();
+    setInterval(loadAllPositions, 60000);
+    // New markers only every 10s (does not refresh existing markers)
+    setInterval(loadNewPositionsOnly, 10000);
   </script>
 </body>
 </html>
