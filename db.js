@@ -44,6 +44,9 @@ async function initSchema() {
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS "manualOverride" BOOLEAN DEFAULT false
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS "anonymousLocation" BOOLEAN DEFAULT false
+  `);
 }
 
 module.exports = { pool, initSchema };

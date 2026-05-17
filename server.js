@@ -151,9 +151,19 @@ app.get('/api/skins', async (req, res) => {
 });
 
 const placeCache = new Map();
+const countryBboxCache = new Map();
+let lastNominatimAt = 0;
+
 function getCacheKey(lat, lng) {
   return `${Math.round(lat * 10) / 10},${Math.round(lng * 10) / 10}`;
 }
+
+async function waitNominatimSlot() {
+  const wait = Math.max(0, 1100 - (Date.now() - lastNominatimAt));
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastNominatimAt = Date.now();
+}
+
 function fetchPlace(lat, lng) {
   const key = getCacheKey(lat, lng);
   if (placeCache.has(key)) return Promise.resolve(placeCache.get(key));
@@ -165,12 +175,71 @@ function fetchPlace(lat, lng) {
     .then((data) => {
       const addr = (data && data.address) ? data.address : {};
       const country = addr.country || 'Unknown';
+      const countryCode = (addr.country_code || '').toUpperCase();
       const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
-      const place = { country, city };
+      const place = { country, countryCode, city };
       placeCache.set(key, place);
       return place;
     })
-    .catch(() => ({ country: 'Unknown', city: '' }));
+    .catch(() => ({ country: 'Unknown', countryCode: '', city: '' }));
+}
+
+async function getCountryBoundingBox(countryName) {
+  const name = (countryName || '').trim();
+  if (!name || name === 'Unknown') return null;
+  if (countryBboxCache.has(name)) return countryBboxCache.get(name);
+  await waitNominatimSlot();
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?country=${encodeURIComponent(name)}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'Juliemap/1.0', 'Accept-Language': 'en' } }
+    );
+    const data = await res.json();
+    const hit = Array.isArray(data) && data[0] ? data[0] : null;
+    const bbox = hit && hit.boundingbox ? hit.boundingbox.map(Number) : null;
+    if (bbox && bbox.length === 4 && bbox.every((n) => Number.isFinite(n))) {
+      countryBboxCache.set(name, bbox);
+      return bbox;
+    }
+  } catch (e) {
+    console.warn('getCountryBoundingBox:', e.message);
+  }
+  countryBboxCache.set(name, null);
+  return null;
+}
+
+function randomLatLngInBbox(bbox) {
+  const [south, north, west, east] = bbox;
+  return {
+    lat: south + Math.random() * (north - south),
+    lng: west + Math.random() * (east - west)
+  };
+}
+
+/** Pick a random point inside the user's country (from real GPS); fallback: small jitter around GPS. */
+async function randomPointInCountry(realLat, realLng) {
+  const place = await fetchPlace(realLat, realLng);
+  const bbox = await getCountryBoundingBox(place.country);
+  if (!bbox) {
+    const jitter = 0.35 + Math.random() * 0.9;
+    const angle = Math.random() * Math.PI * 2;
+    return {
+      lat: realLat + Math.cos(angle) * jitter,
+      lng: realLng + Math.sin(angle) * jitter,
+      country: place.country,
+      city: ''
+    };
+  }
+  for (let i = 0; i < 5; i++) {
+    const { lat, lng } = randomLatLngInBbox(bbox);
+    const check = await fetchPlace(lat, lng);
+    if (check.country === place.country || (place.countryCode && check.countryCode === place.countryCode)) {
+      return { lat, lng, country: place.country, city: '' };
+    }
+    await waitNominatimSlot();
+  }
+  const { lat, lng } = randomLatLngInBbox(bbox);
+  return { lat, lng, country: place.country, city: '' };
 }
 
 function isManualOverrideRow(row) {
@@ -182,7 +251,8 @@ async function fillUnknownCountries() {
     const { rows } = await pool.query(
       `SELECT id, lat, lng FROM users
        WHERE (country IS NULL OR country = '' OR country = 'Unknown')
-         AND COALESCE("manualOverride", false) = false`
+         AND COALESCE("manualOverride", false) = false
+         AND COALESCE("anonymousLocation", false) = false`
     );
     if (!rows.length) return;
     for (const u of rows) {
@@ -208,7 +278,7 @@ function getNextPointAtUtc(todayYYYYMMDD) {
 }
 
 app.post('/api/position', async (req, res) => {
-  const { userId, lat, lng, username, skin } = req.body;
+  const { userId, lat, lng, username, skin, anonymous } = req.body;
 
   if (!userId || typeof lat !== 'number' || typeof lng !== 'number' || !username || !username.trim()) {
     return res.status(400).json({ error: 'Invalid data' });
@@ -216,23 +286,15 @@ app.post('/api/position', async (req, res) => {
 
   const cleanUsername = String(username).trim().slice(0, 40);
   let cleanSkin = skin != null && String(skin).trim() ? String(skin).trim().slice(0, 500) : null;
+  const wantAnonymous = anonymous === true || anonymous === 'true' || anonymous === 1;
 
   const now = new Date().toISOString();
-  let country = 'Unknown';
-  let city = '';
-  try {
-    const place = await fetchPlace(lat, lng);
-    country = place.country;
-    city = place.city || '';
-  } catch (e) {
-    console.warn('Geocode failed:', e.message);
-  }
-
   const today = now.slice(0, 10);
 
   try {
     const { rows: existing } = await pool.query(
-      'SELECT visits, skin, "lastVisitDate", "manualOverride" FROM users WHERE id = $1',
+      `SELECT visits, skin, "lastVisitDate", "manualOverride", "anonymousLocation", lat, lng, country, city
+       FROM users WHERE id = $1`,
       [userId]
     );
     const row = existing[0] || null;
@@ -241,10 +303,42 @@ app.post('/api/position', async (req, res) => {
       const nextPointAt = lastDate === today ? getNextPointAtUtc(today) : null;
       return res.json({ ok: true, manualOverride: true, nextPointAt });
     }
+
+    const alreadyAnonymous = row && (row.anonymousLocation === true || row.anonymousLocation === 't');
+    const hasStoredPosition =
+      row && typeof row.lat === 'number' && typeof row.lng === 'number' && Number.isFinite(row.lat);
+
+    let latUse = lat;
+    let lngUse = lng;
+    let country = 'Unknown';
+    let city = '';
+    let setAnonymous = false;
+
+    if (alreadyAnonymous && hasStoredPosition) {
+      latUse = row.lat;
+      lngUse = row.lng;
+      country = row.country || 'Unknown';
+      city = row.city || '';
+    } else if (wantAnonymous && !hasStoredPosition) {
+      const randomPt = await randomPointInCountry(lat, lng);
+      latUse = randomPt.lat;
+      lngUse = randomPt.lng;
+      country = randomPt.country;
+      city = randomPt.city;
+      setAnonymous = true;
+    } else {
+      try {
+        const place = await fetchPlace(lat, lng);
+        country = place.country;
+        city = place.city || '';
+      } catch (e) {
+        console.warn('Geocode failed:', e.message);
+      }
+    }
+
     const currentVisits = row && typeof row.visits === 'number' ? row.visits : 0;
     const lastDate = row && row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const alreadyCountedToday = lastDate === today;
-    const newVisits = alreadyCountedToday ? currentVisits : currentVisits + 1;
+    const newVisits = lastDate === today ? currentVisits : currentVisits + 1;
     const previousSkin = row && row.skin != null ? String(row.skin).trim() : null;
 
     let skinToUse = cleanSkin;
@@ -259,22 +353,29 @@ app.post('/api/position', async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO users (id, lat, lng, username, visits, country, city, skin, "lastVisitDate", "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO users (id, lat, lng, username, visits, country, city, skin, "lastVisitDate", "createdAt", "updatedAt", "anonymousLocation")
+       VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $13)
        ON CONFLICT (id) DO UPDATE SET
-         lat = EXCLUDED.lat,
-         lng = EXCLUDED.lng,
+         lat = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lat ELSE EXCLUDED.lat END,
+         lng = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.lng ELSE EXCLUDED.lng END,
          username = EXCLUDED.username,
          visits = CASE WHEN COALESCE(users."lastVisitDate", '') = $11 THEN users.visits ELSE users.visits + 1 END,
-         country = EXCLUDED.country,
-         city = EXCLUDED.city,
+         country = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.country ELSE EXCLUDED.country END,
+         city = CASE WHEN COALESCE(users."anonymousLocation", false) = true THEN users.city ELSE EXCLUDED.city END,
          skin = COALESCE(EXCLUDED.skin, users.skin),
          "lastVisitDate" = CASE WHEN COALESCE(users."lastVisitDate", '') = $11 THEN users."lastVisitDate" ELSE $12 END,
-         "updatedAt" = EXCLUDED."updatedAt"`,
-      [userId, lat, lng, cleanUsername, country, city, skinToUse, today, now, now, today, today]
+         "updatedAt" = EXCLUDED."updatedAt",
+         "anonymousLocation" = COALESCE(users."anonymousLocation", EXCLUDED."anonymousLocation")`,
+      [userId, latUse, lngUse, cleanUsername, country, city, skinToUse, today, now, now, today, today, setAnonymous]
     );
 
-    res.json({ ok: true, nextPointAt: getNextPointAtUtc(today) });
+    res.json({
+      ok: true,
+      nextPointAt: getNextPointAtUtc(today),
+      anonymousLocation: alreadyAnonymous || setAnonymous,
+      lat: latUse,
+      lng: lngUse
+    });
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
