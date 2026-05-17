@@ -47,6 +47,9 @@ async function initSchema() {
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS "anonymousLocation" BOOLEAN DEFAULT false
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS "lastPointEarnedAt" TEXT
+  `);
 }
 
 module.exports = { pool, initSchema };
