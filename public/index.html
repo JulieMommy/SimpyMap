@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SympyMap - Julie&apos;s World</title>
+  <title>Juliemap · Shared world</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -502,7 +502,7 @@
       font-style: italic;
       color: rgba(254, 240, 138, 0.95);
     }
-    /* "Last Submitted" panel top left */
+    /* "Last joined" panel top left */
     .last-joined {
       background: rgba(15, 23, 42, 0.92);
       border: 1px solid rgba(148, 163, 255, 0.25);
@@ -566,7 +566,7 @@
       font-size: 11px;
       color: rgba(248, 250, 252, 0.6);
     }
-    /* Top-left panels container (Last Submitted + Top scores) */
+    /* Top-left panels container (Last joined + Top scores) */
     .top-left-panels {
       position: absolute;
       top: 10px;
@@ -576,7 +576,7 @@
       flex-direction: column;
       gap: 10px;
     }
-    /* Top 10 scores panel (below Last Submitted) */
+    /* Top 10 scores panel (below Last joined) */
     .top-scores {
       background: rgba(15, 23, 42, 0.92);
       border: 1px solid rgba(148, 163, 255, 0.25);
@@ -887,7 +887,7 @@
   <div class="top-left-panels">
     <div class="last-joined" id="last-joined">
       <div class="last-joined-header" id="last-joined-header" title="Click to expand/collapse">
-        <div class="last-joined-title">Last Submitted</div>
+        <div class="last-joined-title">Last joined</div>
         <svg class="last-joined-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </div>
       <ul class="last-joined-list" id="last-joined-list"></ul>
@@ -911,36 +911,37 @@
   </div>
   <div class="top-bar">
     <div class="status-dot"></div>
-    <span id="top-bar-visitors">You are one of — simps</span>
+    <span id="top-bar-visitors">You are one of — visitors</span>
   </div>
   <div class="next-point-timer is-collapsed" id="next-point-timer" style="display: none;">
     <div class="next-point-header" id="next-point-header" title="Click to expand/collapse">
       <div class="next-point-header-top">
-        <div class="label">Next S-Point in</div>
+        <div class="label">Next point in</div>
         <svg class="next-point-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </div>
       <div class="countdown" id="next-point-countdown">—</div>
     </div>
     <div class="next-point-body">
-      <p>First 5 S-Points: wait <strong>5 min</strong>, then <strong>10 min</strong>, <strong>15 min</strong>, then <strong>1 h</strong> between each gain. After 5 points: <strong>1 Simp-Point per day</strong> when you connect (UTC).</p>
+      <p>You gain <strong>1 point</strong> per day when you send your position.</p>
+      <p>Once you&apos;ve scored for today, you can earn a new point again after <strong>midnight (UTC)</strong>.</p>
     </div>
   </div>
   <div class="pseudo-overlay" id="pseudo-overlay">
     <div class="pseudo-card">
-      <div class="pseudo-title">Enter your Pseudo, simp 😈</div>
+      <div class="pseudo-title">Choose your name</div>
       <div class="pseudo-subtitle">It will be visible to everyone on the map.</div>
       <input
         id="pseudo-input"
         class="pseudo-input"
         type="text"
         maxlength="40"
-        placeholder="Beta, Loser, Bitch…"
+        placeholder="e.g. Julie, Alex, Luna..."
       />
       <label class="pseudo-anonymous" for="pseudo-anonymous">
         <input type="checkbox" id="pseudo-anonymous" />
         <span class="pseudo-anonymous-text">
           <strong>Stay anonymous</strong>
-          Place your point somewhere random in your country. Hide your exact address. For scared little bitch🤭
+          Place my point somewhere random in my country — not at my exact address. This spot stays fixed when I return.
         </span>
       </label>
       <div id="pseudo-error" class="pseudo-error"></div>
@@ -1156,52 +1157,24 @@
     const otherMarkers = new Map(); // id -> marker
     const userSkinsCache = new Map(); // id -> skin (filled by loadAllPositions, used by leaderboard)
     let currentSkin = (localStorage.getItem('skin') || 'red').trim();
-    let myVisits = 1, myLat = null, myLng = 0, amTopScorer = false;
-    let earnSyncInFlight = false;
+    let myVisits = 1, myLng = 0, amTopScorer = false;
 
     // Next-point timer: nextPointAt = ISO string (next UTC midnight) or null if available now
     let nextPointAt = null;
-    let pointsFrozen = false;
     function fetchNextPoint() {
-      return fetch(`/api/next-point?userId=${encodeURIComponent(userId)}`)
+      fetch(`/api/next-point?userId=${encodeURIComponent(userId)}`)
         .then((r) => r.json())
         .then((data) => {
-          pointsFrozen = data.pointsFrozen === true || data.manualOverride === true;
-          nextPointAt = pointsFrozen ? 'frozen' : (data.nextPointAt || null);
+          nextPointAt = data.nextPointAt || null;
           updateNextPointDisplay();
-          if (!pointsFrozen && !nextPointAt && data.canEarn) tryEarnPointWhenReady();
-          return data;
         })
         .catch(() => {});
-    }
-
-    async function tryEarnPointWhenReady() {
-      if (earnSyncInFlight || !username || nextPointAt || pointsFrozen) return;
-      if (typeof myLat !== 'number' || typeof myLng !== 'number') return;
-      earnSyncInFlight = true;
-      try {
-        const data = await sendPosition(myLat, myLng);
-        if (data && data.pointEarned) {
-          myVisits = typeof data.visits === 'number' ? data.visits : myVisits;
-        }
-        await fetchNextPoint();
-        loadAllPositions();
-      } catch (e) {
-        console.error('tryEarnPointWhenReady:', e);
-      } finally {
-        earnSyncInFlight = false;
-      }
     }
     function updateNextPointDisplay() {
       const el = document.getElementById('next-point-timer');
       const countEl = document.getElementById('next-point-countdown');
       if (!el || !countEl) return;
       el.style.display = '';
-      if (pointsFrozen || nextPointAt === 'frozen') {
-        el.classList.remove('available');
-        countEl.textContent = 'Score frozen (admin)';
-        return;
-      }
       if (!nextPointAt) {
         el.classList.add('available');
         countEl.textContent = 'Available now';
@@ -1212,6 +1185,7 @@
       const now = Date.now();
       const ms = Math.max(0, target - now);
       if (ms <= 0) {
+        nextPointAt = null;
         fetchNextPoint();
         return;
       }
@@ -1234,9 +1208,8 @@
       })
         .then((res) => res.json())
         .then((data) => {
-          pointsFrozen = data.pointsFrozen === true || data.manualOverride === true;
-          nextPointAt = pointsFrozen ? 'frozen' : (data.nextPointAt != null ? data.nextPointAt : null);
-          if (typeof data.visits === 'number') myVisits = data.visits;
+          if (data.nextPointAt != null) nextPointAt = data.nextPointAt;
+          else nextPointAt = null;
           updateNextPointDisplay();
           return data;
         });
@@ -1245,18 +1218,18 @@
     function getPopupHtml(name, visits, isMe) {
       const safeName = name || (isMe ? 'Me' : 'Guest');
       const count = !visits || visits < 1 ? 1 : visits;
-      const times = count > 1 ? 'TIMES' : 'TIME';
-      return `${safeName}<span class="popup-sub">LOST ${count} ${times}</span>`;
+      const times = count > 1 ? 'times' : 'time';
+      return `${safeName}<span class="popup-sub">CLICKED ${count} ${times}</span>`;
     }
 
     function updateTopBarVisitors(count) {
       const el = document.getElementById('top-bar-visitors');
       if (!el) return;
       if (count == null || count === 0) {
-        el.textContent = 'You are one of — simps';
+        el.textContent = 'You are one of — visitors';
         return;
       }
-      el.textContent = count === 1 ? 'You are the only simp' : `You are one of ${count} simps`;
+      el.textContent = count === 1 ? 'You are the only visitor' : `You are one of ${count} visitors`;
     }
 
     function minutesAgo(isoDate) {
@@ -1357,15 +1330,26 @@
       return div.innerHTML;
     }
 
+    let positionsRefreshMs = 60000;
+    let positionsRefreshTimer = null;
+    function schedulePositionsRefresh() {
+      if (positionsRefreshTimer) clearInterval(positionsRefreshTimer);
+      positionsRefreshTimer = setInterval(loadAllPositions, positionsRefreshMs);
+    }
+
     // Load all positions from server
     function loadAllPositions() {
-      return fetch('/api/positions')
+      fetch('/api/positions')
         .then((res) => res.json())
         .then((users) => {
           const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
           const meRow = valid.find((u) => u.id === userId);
           const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
-          if (meManual) pointsFrozen = true;
+          const nextMs = meManual ? 10000 : 60000;
+          if (nextMs !== positionsRefreshMs) {
+            positionsRefreshMs = nextMs;
+            schedulePositionsRefresh();
+          }
           updateTopBarVisitors(valid.length);
           const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
           const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
@@ -1381,7 +1365,6 @@
             const isTopScorer = topScorerIds.has(key);
             if (isMe) {
               myVisits = visits;
-              myLat = u.lat;
               myLng = u.lng;
               amTopScorer = isTopScorer;
               if (u.anonymousLocation === true || u.anonymousLocation === 't') {
@@ -1452,7 +1435,6 @@
             const isTopScorer = topScorerIds.has(key);
             if (isMe) {
               myVisits = visits;
-              myLat = u.lat;
               myLng = u.lng;
               amTopScorer = isTopScorer;
               if (u.anonymousLocation === true || u.anonymousLocation === 't') {
@@ -1490,7 +1472,6 @@
         .catch((err) => {
           console.error('Error while loading new positions:', err);
         });
-      loadLeaderboard();
       loadLastJoined();
       loadTopScores();
     }
@@ -1528,29 +1509,18 @@
 
     // Get my current position and send it
     function initGeolocationAndSync() {
-      const afterPositions = loadAllPositions();
-
       if (!('geolocation' in navigator)) {
         alert("Your browser does not support geolocation.");
-        return afterPositions;
-      }
-
-      const isAnonymous = localStorage.getItem('anonymousLocation') === 'true';
-      if (isAnonymous && typeof myLat === 'number' && typeof myLng === 'number') {
-        afterPositions.then(() => tryEarnPointWhenReady());
+        loadAllPositions();
+        return;
       }
 
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
-          if (!isAnonymous) {
-            myLat = lat;
-            myLng = lng;
-          }
           try {
-            await sendPosition(isAnonymous && typeof myLat === 'number' ? myLat : lat, isAnonymous && typeof myLng === 'number' ? myLng : lng);
-            await fetchNextPoint();
+            await sendPosition(lat, lng);
           } catch (e) {
             console.error('Error while sending position:', e);
           }
@@ -1558,12 +1528,10 @@
         },
         (err) => {
           console.error('Geolocation error:', err);
-          if (!isAnonymous) alert("Unable to get your position (check permissions).");
-          afterPositions.then(() => tryEarnPointWhenReady());
-          loadAllPositions();
+          alert("Unable to get your position (check permissions).");
+          loadAllPositions(); // at least see others
         }
       );
-      return afterPositions;
     }
 
     // Name handling: block access until it is defined
@@ -1589,8 +1557,8 @@
         }
         overlay.style.display = 'none';
         error.textContent = '';
+        // loadAllPositions() called once in geoloc callback (success or error)
         initGeolocationAndSync();
-        loadAllPositions();
       }
 
       button.addEventListener('click', trySetPseudo);
@@ -1611,8 +1579,8 @@
       if (stored && stored.trim()) {
         username = stored.trim().slice(0, 40);
         overlay.style.display = 'none';
+        // loadAllPositions() called once in geoloc callback (success or error)
         initGeolocationAndSync();
-        loadAllPositions();
       } else {
         overlay.style.display = 'flex';
       }
@@ -1634,7 +1602,7 @@
       panel.addEventListener('click', () => panel.classList.toggle('is-collapsed'));
     })();
 
-    // Last Submitted: header expands/collapses list
+    // Last joined: header expands/collapses list
     (function setupLastJoinedToggle() {
       const panel = document.getElementById('last-joined');
       const header = document.getElementById('last-joined-header');
@@ -1798,9 +1766,7 @@
     }
     setupSkinPanel();
 
-    setInterval(loadAllPositions, 60000);
-    // New markers only every 10s (does not refresh existing markers)
-    setInterval(loadNewPositionsOnly, 10000);
+    schedulePositionsRefresh();
   </script>
 </body>
 </html>
