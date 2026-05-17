@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Juliemap · Shared world</title>
+  <title>SympyMap - Julie&apos;s World</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -502,7 +502,7 @@
       font-style: italic;
       color: rgba(254, 240, 138, 0.95);
     }
-    /* "Last joined" panel top left */
+    /* "Last Submitted" panel top left */
     .last-joined {
       background: rgba(15, 23, 42, 0.92);
       border: 1px solid rgba(148, 163, 255, 0.25);
@@ -566,7 +566,7 @@
       font-size: 11px;
       color: rgba(248, 250, 252, 0.6);
     }
-    /* Top-left panels container (Last joined + Top scores) */
+    /* Top-left panels container (Last Submitted + Top scores) */
     .top-left-panels {
       position: absolute;
       top: 10px;
@@ -576,7 +576,7 @@
       flex-direction: column;
       gap: 10px;
     }
-    /* Top 10 scores panel (below Last joined) */
+    /* Top 10 scores panel (below Last Submitted) */
     .top-scores {
       background: rgba(15, 23, 42, 0.92);
       border: 1px solid rgba(148, 163, 255, 0.25);
@@ -887,7 +887,7 @@
   <div class="top-left-panels">
     <div class="last-joined" id="last-joined">
       <div class="last-joined-header" id="last-joined-header" title="Click to expand/collapse">
-        <div class="last-joined-title">Last joined</div>
+        <div class="last-joined-title">Last Submitted</div>
         <svg class="last-joined-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </div>
       <ul class="last-joined-list" id="last-joined-list"></ul>
@@ -911,37 +911,35 @@
   </div>
   <div class="top-bar">
     <div class="status-dot"></div>
-    <span id="top-bar-visitors">You are one of — visitors</span>
+    <span id="top-bar-visitors">You are one of — simps</span>
   </div>
   <div class="next-point-timer is-collapsed" id="next-point-timer" style="display: none;">
     <div class="next-point-header" id="next-point-header" title="Click to expand/collapse">
       <div class="next-point-header-top">
-        <div class="label">Next point in</div>
+        <div class="label">Next S-Point in</div>
         <svg class="next-point-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </div>
       <div class="countdown" id="next-point-countdown">—</div>
     </div>
     <div class="next-point-body">
-      <p>You gain <strong>1 point</strong> per day when you send your position.</p>
-      <p>Once you&apos;ve scored for today, you can earn a new point again after <strong>midnight (UTC)</strong>.</p>
+      <p>You gain 1 Simp-Point per day when you connect.</p>
     </div>
   </div>
   <div class="pseudo-overlay" id="pseudo-overlay">
     <div class="pseudo-card">
-      <div class="pseudo-title">Choose your name</div>
+      <div class="pseudo-title">Enter your Pseudo, simp 😈</div>
       <div class="pseudo-subtitle">It will be visible to everyone on the map.</div>
       <input
         id="pseudo-input"
         class="pseudo-input"
         type="text"
         maxlength="40"
-        placeholder="e.g. Julie, Alex, Luna..."
+        placeholder="Beta, Loser, Bitch…"
       />
       <label class="pseudo-anonymous" for="pseudo-anonymous">
         <input type="checkbox" id="pseudo-anonymous" />
         <span class="pseudo-anonymous-text">
-          <strong>Stay anonymous</strong>
-          Place my point somewhere random in my country — not at my exact address. This spot stays fixed when I return.
+          Place my point somewhere random in my country. Hide your exact address. For scared little bitch🤭
         </span>
       </label>
       <div id="pseudo-error" class="pseudo-error"></div>
@@ -1218,18 +1216,18 @@
     function getPopupHtml(name, visits, isMe) {
       const safeName = name || (isMe ? 'Me' : 'Guest');
       const count = !visits || visits < 1 ? 1 : visits;
-      const times = count > 1 ? 'times' : 'time';
-      return `${safeName}<span class="popup-sub">CLICKED ${count} ${times}</span>`;
+      const times = count > 1 ? 'TIMES' : 'TIME';
+      return `${safeName}<span class="popup-sub">LOST ${count} ${times}</span>`;
     }
 
     function updateTopBarVisitors(count) {
       const el = document.getElementById('top-bar-visitors');
       if (!el) return;
       if (count == null || count === 0) {
-        el.textContent = 'You are one of — visitors';
+        el.textContent = 'You are one of — simps';
         return;
       }
-      el.textContent = count === 1 ? 'You are the only visitor' : `You are one of ${count} visitors`;
+      el.textContent = count === 1 ? 'You are the only simp' : `You are one of ${count} simps`;
     }
 
     function minutesAgo(isoDate) {
@@ -1602,7 +1600,7 @@
       panel.addEventListener('click', () => panel.classList.toggle('is-collapsed'));
     })();
 
-    // Last joined: header expands/collapses list
+    // Last Submitted: header expands/collapses list
     (function setupLastJoinedToggle() {
       const panel = document.getElementById('last-joined');
       const header = document.getElementById('last-joined-header');
