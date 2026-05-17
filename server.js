@@ -164,6 +164,15 @@ async function waitNominatimSlot() {
   lastNominatimAt = Date.now();
 }
 
+function parsePlaceFromNominatim(data) {
+  const addr = (data && data.address) ? data.address : {};
+  return {
+    country: addr.country || 'Unknown',
+    countryCode: (addr.country_code || '').toUpperCase(),
+    city: addr.city || addr.town || addr.village || addr.municipality || addr.county || ''
+  };
+}
+
 function fetchPlace(lat, lng) {
   const key = getCacheKey(lat, lng);
   if (placeCache.has(key)) return Promise.resolve(placeCache.get(key));
@@ -173,38 +182,58 @@ function fetchPlace(lat, lng) {
   )
     .then((r) => r.json())
     .then((data) => {
-      const addr = (data && data.address) ? data.address : {};
-      const country = addr.country || 'Unknown';
-      const countryCode = (addr.country_code || '').toUpperCase();
-      const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
-      const place = { country, countryCode, city };
+      const place = parsePlaceFromNominatim(data);
       placeCache.set(key, place);
       return place;
     })
     .catch(() => ({ country: 'Unknown', countryCode: '', city: '' }));
 }
 
-async function getCountryBoundingBox(countryName) {
-  const name = (countryName || '').trim();
-  if (!name || name === 'Unknown') return null;
-  if (countryBboxCache.has(name)) return countryBboxCache.get(name);
+/** Reverse geocode without cache — used to validate random candidates. */
+async function fetchPlaceFresh(lat, lng) {
   await waitNominatimSlot();
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?country=${encodeURIComponent(name)}&format=json&limit=1`,
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
       { headers: { 'User-Agent': 'Juliemap/1.0', 'Accept-Language': 'en' } }
     );
     const data = await res.json();
-    const hit = Array.isArray(data) && data[0] ? data[0] : null;
+    return parsePlaceFromNominatim(data);
+  } catch (e) {
+    console.warn('fetchPlaceFresh:', e.message);
+    return { country: 'Unknown', countryCode: '', city: '' };
+  }
+}
+
+async function getCountryBoundingBox(countryName, countryCode) {
+  const code = (countryCode || '').trim().toUpperCase();
+  const name = (countryName || '').trim();
+  if (!name || name === 'Unknown') return null;
+  const cacheKey = code || name;
+  if (countryBboxCache.has(cacheKey)) return countryBboxCache.get(cacheKey);
+  await waitNominatimSlot();
+  try {
+    let url =
+      `https://nominatim.openstreetmap.org/search?format=json&limit=5&featuretype=country&country=${encodeURIComponent(name)}`;
+    if (code) url += `&countrycodes=${encodeURIComponent(code.toLowerCase())}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Juliemap/1.0', 'Accept-Language': 'en' }
+    });
+    const data = await res.json();
+    const hits = Array.isArray(data) ? data : [];
+    const hit =
+      hits.find((h) => code && (h.country_code || '').toUpperCase() === code) ||
+      hits.find((h) => String(h.type || '').toLowerCase() === 'country') ||
+      hits[0];
     const bbox = hit && hit.boundingbox ? hit.boundingbox.map(Number) : null;
     if (bbox && bbox.length === 4 && bbox.every((n) => Number.isFinite(n))) {
-      countryBboxCache.set(name, bbox);
+      countryBboxCache.set(cacheKey, bbox);
       return bbox;
     }
   } catch (e) {
     console.warn('getCountryBoundingBox:', e.message);
   }
-  countryBboxCache.set(name, null);
+  countryBboxCache.set(cacheKey, null);
   return null;
 }
 
@@ -216,30 +245,93 @@ function randomLatLngInBbox(bbox) {
   };
 }
 
-/** Pick a random point inside the user's country (from real GPS); fallback: small jitter around GPS. */
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function maxRadiusKmForCountry(bbox) {
+  if (!bbox) return 450;
+  const [south, north, west, east] = bbox;
+  const midLat = (south + north) / 2;
+  const heightKm = Math.abs(north - south) * 111;
+  const widthKm = Math.abs(east - west) * 111 * Math.cos((midLat * Math.PI) / 180);
+  return Math.min(2800, Math.max(180, Math.max(heightKm, widthKm) * 0.6));
+}
+
+function isSameCountry(place, targetCode, targetCountry) {
+  if (targetCode && place.countryCode === targetCode) return true;
+  if (!targetCode && targetCountry && place.country === targetCountry) return true;
+  return false;
+}
+
+function isCandidateAllowed(realLat, realLng, lat, lng, targetCode, targetCountry, bbox) {
+  if (!isFinite(lat) || !isFinite(lng)) return false;
+  const maxKm = maxRadiusKmForCountry(bbox);
+  if (haversineKm(realLat, realLng, lat, lng) > maxKm) return false;
+  if (bbox) {
+    const [south, north, west, east] = bbox;
+    if (lat < south || lat > north) return false;
+    if (west <= east) {
+      if (lng < west || lng > east) return false;
+    } else if (lng > east && lng < west) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function tryAcceptCandidate(realLat, realLng, lat, lng, targetCode, targetCountry, bbox) {
+  if (!isCandidateAllowed(realLat, realLng, lat, lng, targetCode, targetCountry, bbox)) {
+    return null;
+  }
+  const check = await fetchPlaceFresh(lat, lng);
+  if (!isSameCountry(check, targetCode, targetCountry)) return null;
+  return { lat, lng, country: targetCountry, city: '' };
+}
+
+/** Random point guaranteed (by reverse geocode) to stay in the user's country. */
 async function randomPointInCountry(realLat, realLng) {
   const place = await fetchPlace(realLat, realLng);
-  const bbox = await getCountryBoundingBox(place.country);
-  if (!bbox) {
-    const jitter = 0.35 + Math.random() * 0.9;
-    const angle = Math.random() * Math.PI * 2;
-    return {
-      lat: realLat + Math.cos(angle) * jitter,
-      lng: realLng + Math.sin(angle) * jitter,
-      country: place.country,
-      city: ''
-    };
+  const targetCode = place.countryCode;
+  const targetCountry = place.country;
+  if (!targetCode && (!targetCountry || targetCountry === 'Unknown')) {
+    return { lat: realLat, lng: realLng, country: 'Unknown', city: '' };
   }
-  for (let i = 0; i < 5; i++) {
-    const { lat, lng } = randomLatLngInBbox(bbox);
-    const check = await fetchPlace(lat, lng);
-    if (check.country === place.country || (place.countryCode && check.countryCode === place.countryCode)) {
-      return { lat, lng, country: place.country, city: '' };
+
+  const bbox = await getCountryBoundingBox(targetCountry, targetCode);
+  const maxKm = maxRadiusKmForCountry(bbox);
+
+  if (bbox) {
+    for (let i = 0; i < 15; i++) {
+      const { lat, lng } = randomLatLngInBbox(bbox);
+      const accepted = await tryAcceptCandidate(
+        realLat, realLng, lat, lng, targetCode, targetCountry, bbox
+      );
+      if (accepted) return accepted;
     }
-    await waitNominatimSlot();
   }
-  const { lat, lng } = randomLatLngInBbox(bbox);
-  return { lat, lng, country: place.country, city: '' };
+
+  for (let i = 0; i < 12; i++) {
+    const distKm = 15 + Math.random() * Math.min(maxKm * 0.85, 750);
+    const angle = Math.random() * Math.PI * 2;
+    const dLat = (distKm / 111) * Math.cos(angle);
+    const dLng = (distKm / (111 * Math.cos((realLat * Math.PI) / 180))) * Math.sin(angle);
+    const lat = realLat + dLat;
+    const lng = realLng + dLng;
+    const accepted = await tryAcceptCandidate(
+      realLat, realLng, lat, lng, targetCode, targetCountry, bbox
+    );
+    if (accepted) return accepted;
+  }
+
+  console.warn('randomPointInCountry: fallback to approximate GPS for', targetCode || targetCountry);
+  return { lat: realLat, lng: realLng, country: targetCountry, city: '' };
 }
 
 function isManualOverrideRow(row) {
