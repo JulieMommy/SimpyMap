@@ -375,37 +375,130 @@
       letter-spacing: 0.06em;
     }
 
+    /* Stats drawer (mobile): groups Last Submitted + Top scores + Top countries */
+    .stats-panel-toggle {
+      display: none;
+    }
+    .stats-panel-body {
+      display: contents;
+    }
+
     /* Mobile tweaks */
     @media (max-width: 768px) {
+      :root {
+        --mobile-burger-reserve: 52px;
+      }
       .top-bar {
-        top: 8px;
+        top: max(8px, env(safe-area-inset-top, 0px));
         left: 50%;
         transform: translateX(-50%);
         padding: 6px 10px;
-        font-size: 12px;
+        font-size: 11px;
+        max-width: calc(100vw - var(--mobile-burger-reserve) - 24px);
+        z-index: 999;
       }
       .next-point-timer {
-        top: 44px;
+        top: max(44px, calc(env(safe-area-inset-top, 0px) + 36px));
         right: 8px;
         font-size: 12px;
         min-width: 0;
-        max-width: 200px;
-      }
-      .top-left-panels {
-        top: 70px;
-        left: 8px;
-        gap: 6px;
+        max-width: min(200px, calc(100vw - var(--mobile-burger-reserve) - 16px));
       }
       .skin-panel {
         right: 8px;
         top: auto;
         bottom: 80px;
       }
-      .leaderboard {
-        left: 8px;
+      .stats-panel {
+        position: absolute;
+        top: max(var(--mobile-burger-reserve), calc(env(safe-area-inset-top, 0px) + var(--mobile-burger-reserve)));
+        left: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: flex-start;
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid rgba(148, 163, 255, 0.25);
+        border-left: none;
+        border-radius: 0 12px 12px 0;
+        backdrop-filter: blur(8px);
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+        max-height: calc(100vh - var(--mobile-burger-reserve) - 24px);
+      }
+      .stats-panel-toggle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        width: 40px;
+        min-height: 72px;
+        padding: 10px 8px;
+        cursor: pointer;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        color: rgba(248, 250, 252, 0.85);
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+      }
+      .stats-panel-chevron {
+        width: 14px;
+        height: 14px;
+        opacity: 0.85;
+        transition: transform 0.25s ease;
+        flex-shrink: 0;
+      }
+      .stats-panel.is-collapsed .stats-panel-chevron {
+        transform: rotate(180deg);
+      }
+      .stats-panel-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        max-width: 0;
+        max-height: calc(100vh - var(--mobile-burger-reserve) - 32px);
+        opacity: 0;
+        transition: max-width 0.3s ease, padding 0.2s ease, opacity 0.25s ease;
+      }
+      .stats-panel:not(.is-collapsed) .stats-panel-body {
+        max-width: min(260px, calc(100vw - var(--mobile-burger-reserve) - 48px));
+        opacity: 1;
+        padding: 10px 12px 10px 8px;
+      }
+      .stats-panel .top-left-panels {
+        position: static;
+        top: auto;
+        left: auto;
+        gap: 8px;
+      }
+      .stats-panel .leaderboard {
+        position: static;
+        bottom: auto;
+        left: auto;
         right: auto;
-        bottom: 8px;
-        max-width: 220px;
+        max-width: none;
+        min-width: 0;
+      }
+      .stats-panel .last-joined,
+      .stats-panel .top-scores,
+      .stats-panel .leaderboard {
+        min-width: 0;
+        width: 100%;
+      }
+      .stats-panel:not(.is-collapsed) .last-joined.is-collapsed .last-joined-list,
+      .stats-panel:not(.is-collapsed) .top-scores.is-collapsed .top-scores-list,
+      .stats-panel:not(.is-collapsed) .leaderboard.is-collapsed .leaderboard-body {
+        display: block;
+      }
+      .stats-panel:not(.is-collapsed) .last-joined.is-collapsed .last-joined-chevron,
+      .stats-panel:not(.is-collapsed) .top-scores.is-collapsed .top-scores-chevron,
+      .stats-panel:not(.is-collapsed) .leaderboard.is-collapsed .leaderboard-chevron {
+        transform: rotate(0deg);
       }
       .skin-panel-toggle span,
       .last-joined-title,
@@ -884,6 +977,12 @@
       <ul class="skin-list" id="skin-list"></ul>
     </div>
   </div>
+  <div class="stats-panel is-collapsed" id="stats-panel">
+    <div class="stats-panel-toggle" id="stats-panel-toggle" title="Open / close stats">
+      <span>Stats</span>
+      <svg class="stats-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </div>
+    <div class="stats-panel-body">
   <div class="top-left-panels">
     <div class="last-joined" id="last-joined">
       <div class="last-joined-header" id="last-joined-header" title="Click to expand/collapse">
@@ -909,6 +1008,8 @@
       <ul class="leaderboard-list" id="leaderboard-list"></ul>
     </div>
   </div>
+    </div>
+  </div>
   <div class="top-bar">
     <div class="status-dot"></div>
     <span id="top-bar-visitors">You are one of — simps</span>
@@ -922,7 +1023,7 @@
       <div class="countdown" id="next-point-countdown">—</div>
     </div>
     <div class="next-point-body">
-      <p>First 5 S-Points: wait <strong>5 min</strong>, then <strong>10 min</strong>, <strong>15 min</strong>, then <strong>1 h</strong> between each gain. After 5 points: <strong>1 Simp-Point per day</strong> when you connect (UTC).</p>
+      <p>Simp-Point are your score. You get 1 Simp-Point per day when you connect (UTC).<br>First 5 are boosted (5 min, 10 min, 15 min, 1 h).</p>
     </div>
   </div>
   <div class="pseudo-overlay" id="pseudo-overlay">
@@ -979,10 +1080,11 @@
       wheelPxPerZoomLevel: 30
     });
 
-    // Limit panning to a single world copy and restrict visible latitudes (crop Antarctica)
-    const bounds = [[-10, -180], [72, 180]];
-    map.setMaxBounds(bounds);
-    map.options.maxBoundsViscosity = 1.0;
+    // Initial view: crop Antarctica. Pan limits are wider so zoomed-in panning isn't blocked too soon.
+    const initialBounds = [[-10, -180], [72, 180]];
+    const panBounds = [[-58, -180], [85, 180]];
+    map.setMaxBounds(panBounds);
+    map.options.maxBoundsViscosity = 0.85;
 
     // Dark basemap for a night-style ambiance (no horizontal world repeat)
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -991,8 +1093,7 @@
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     }).addTo(map);
 
-    // Fit the initial view to our rectangular world (cropped Antarctica)
-    map.fitBounds(bounds);
+    map.fitBounds(initialBounds);
 
     // Available skins (type: color | pattern | url for custom image)
     const SKINS = [
@@ -1623,9 +1724,25 @@
       });
     })();
 
+    // Mobile stats drawer (Last Submitted + Top scores + Top countries)
+    (function setupStatsPanel() {
+      const panel = document.getElementById('stats-panel');
+      const toggle = document.getElementById('stats-panel-toggle');
+      if (!panel || !toggle) return;
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.toggle('is-collapsed');
+      });
+    })();
+
     // Collapsibles: desktop ouverts par défaut, mobile repliés
     (function setupInitialPanelsState() {
       const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      const statsPanel = document.getElementById('stats-panel');
+      if (statsPanel) {
+        if (isMobile) statsPanel.classList.add('is-collapsed');
+        else statsPanel.classList.remove('is-collapsed');
+      }
       const panels = [
         document.getElementById('leaderboard'),
         document.getElementById('last-joined'),
