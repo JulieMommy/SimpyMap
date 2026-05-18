@@ -375,12 +375,14 @@
       letter-spacing: 0.06em;
     }
 
-    /* Stats drawer (mobile): groups Last Submitted + Top scores + Top countries */
+    /* Stats panel: invisible wrapper on desktop (panels keep their positions) */
+    .stats-panel,
+    .stats-panel-body,
+    .stats-panel-scroll {
+      display: contents;
+    }
     .stats-panel-toggle {
       display: none;
-    }
-    .stats-panel-body {
-      display: contents;
     }
 
     /* Mobile tweaks */
@@ -421,20 +423,17 @@
         position: absolute;
         top: max(var(--mobile-stats-top), calc(env(safe-area-inset-top, 0px) + var(--mobile-stats-top)));
         left: 0;
+        transform: none;
         z-index: 1000;
-        display: flex;
-        align-items: stretch;
         background: rgba(15, 23, 42, 0.92);
         border: 1px solid rgba(148, 163, 255, 0.25);
         border-left: none;
         border-radius: 0 12px 12px 0;
         backdrop-filter: blur(8px);
-        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
-        max-height: calc(100vh - var(--mobile-stats-top) - 24px);
-      }
-      .stats-panel.is-collapsed {
-        width: fit-content;
+        display: flex;
         align-items: stretch;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+        max-height: calc(100vh - var(--mobile-stats-top) - 16px);
       }
       .stats-panel-toggle {
         display: flex;
@@ -443,77 +442,75 @@
         justify-content: center;
         gap: 6px;
         width: 40px;
-        min-height: 0;
+        min-height: 80px;
         padding: 12px 8px;
         cursor: pointer;
         user-select: none;
         -webkit-tap-highlight-color: transparent;
-        color: rgba(248, 250, 252, 0.85);
-        font-size: 10px;
+        color: rgba(248, 250, 252, 0.8);
+        font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         writing-mode: vertical-rl;
         text-orientation: mixed;
         flex-shrink: 0;
-        box-sizing: border-box;
       }
-      .stats-panel.is-collapsed .stats-panel-toggle {
-        flex-direction: column;
-        writing-mode: vertical-rl;
-        text-orientation: mixed;
-        justify-content: center;
-        align-items: center;
-        align-self: stretch;
-        width: 40px;
-        min-height: 56px;
-        height: auto;
-        padding: 12px 8px;
+      .stats-panel-toggle:hover {
+        color: #f1f5f9;
       }
-      .stats-panel:not(.is-collapsed) .stats-panel-toggle {
-        min-height: 72px;
-        align-self: stretch;
-      }
-      .stats-panel-toggle .stats-panel-chevron {
-        display: block;
+      .stats-panel-chevron {
         width: 14px;
         height: 14px;
-        opacity: 0.9;
+        opacity: 0.8;
         transition: transform 0.25s ease;
         flex-shrink: 0;
-        writing-mode: horizontal-tb;
       }
       .stats-panel.is-collapsed .stats-panel-chevron {
         transform: rotate(180deg);
       }
-      .stats-panel:not(.is-collapsed) .stats-panel-chevron {
-        transform: rotate(0deg);
-      }
       .stats-panel-body {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        overflow-x: hidden;
-        overflow-y: auto;
+        overflow: hidden;
         max-width: 0;
-        max-height: calc(100vh - var(--mobile-stats-top) - 32px);
+        max-height: calc(100vh - var(--mobile-stats-top) - 24px);
         opacity: 0;
         transition: max-width 0.3s ease, padding 0.2s ease, opacity 0.25s ease;
       }
-      .stats-panel:not(.is-collapsed) {
-        max-width: calc(100vw - 4px);
-      }
       .stats-panel:not(.is-collapsed) .stats-panel-body {
-        max-width: min(304px, calc(100vw - 44px));
+        max-width: 180px;
         opacity: 1;
-        padding: 10px 22px 12px 10px;
+        padding: 12px 10px 12px 14px;
         box-sizing: border-box;
+      }
+      .stats-panel-scroll {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        min-height: 0;
+        max-height: calc(100vh - var(--mobile-stats-top) - 48px);
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 255, 0.45) transparent;
+      }
+      .stats-panel-scroll::-webkit-scrollbar {
+        width: 6px;
+      }
+      .stats-panel-scroll::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 255, 0.4);
+        border-radius: 3px;
       }
       .stats-panel .top-left-panels {
         position: static;
         top: auto;
         left: auto;
-        gap: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
       .stats-panel .leaderboard {
         position: static;
@@ -528,16 +525,7 @@
       .stats-panel .leaderboard {
         min-width: 0;
         width: 100%;
-      }
-      .stats-panel:not(.is-collapsed) .last-joined.is-collapsed .last-joined-list,
-      .stats-panel:not(.is-collapsed) .top-scores.is-collapsed .top-scores-list,
-      .stats-panel:not(.is-collapsed) .leaderboard.is-collapsed .leaderboard-body {
-        display: block;
-      }
-      .stats-panel:not(.is-collapsed) .last-joined.is-collapsed .last-joined-chevron,
-      .stats-panel:not(.is-collapsed) .top-scores.is-collapsed .top-scores-chevron,
-      .stats-panel:not(.is-collapsed) .leaderboard.is-collapsed .leaderboard-chevron {
-        transform: rotate(0deg);
+        box-sizing: border-box;
       }
       .skin-panel-toggle span,
       .last-joined-title,
@@ -1039,10 +1027,11 @@
   <div class="stats-panel is-collapsed" id="stats-panel">
     <div class="stats-panel-toggle" id="stats-panel-toggle" title="Open / close stats">
       <span>Stats</span>
-      <svg class="stats-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <svg class="stats-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
     </div>
     <div class="stats-panel-body">
-  <div class="top-left-panels">
+      <div class="stats-panel-scroll">
+        <div class="top-left-panels">
     <div class="last-joined" id="last-joined">
       <div class="last-joined-header" id="last-joined-header" title="Click to expand/collapse">
         <div class="last-joined-title">Last Submitted</div>
@@ -1066,7 +1055,8 @@
     <div class="leaderboard-body">
       <ul class="leaderboard-list" id="leaderboard-list"></ul>
     </div>
-  </div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="top-bar">
