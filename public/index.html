@@ -1294,7 +1294,7 @@
       return ((Number(lng) + 180) / 360) * 1.2;
     }
 
-    const SELECTED_MARKER_SCALE = 2.75;
+    const SELECTED_MARKER_SCALE = 3.5;
 
     function getMarkerBaseSize(visits, isTopScorer) {
       const bandNum = getVisitBandNumber(visits);
@@ -1308,8 +1308,8 @@
 
     function getPopupOffset(visits, isTopScorer, isSelected) {
       const size = getMarkerIconSize(visits, isTopScorer, isSelected);
-      const lift = isSelected ? 22 : 10;
-      return L.point(0, -(Math.round(size / 2) + lift));
+      const gap = isSelected ? 6 : 8;
+      return L.point(0, -(Math.round(size / 2) + gap));
     }
 
     function bindPlayerPopup(marker, popupHtml, visits, isTopScorer, playerId) {
