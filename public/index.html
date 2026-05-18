@@ -474,15 +474,20 @@
         min-height: 72px;
         align-self: stretch;
       }
-      .stats-panel-chevron {
+      .stats-panel-toggle .stats-panel-chevron {
+        display: block;
         width: 14px;
         height: 14px;
-        opacity: 0.85;
+        opacity: 0.9;
         transition: transform 0.25s ease;
         flex-shrink: 0;
+        writing-mode: horizontal-tb;
       }
       .stats-panel.is-collapsed .stats-panel-chevron {
         transform: rotate(180deg);
+      }
+      .stats-panel:not(.is-collapsed) .stats-panel-chevron {
+        transform: rotate(0deg);
       }
       .stats-panel-body {
         display: flex;
@@ -495,10 +500,14 @@
         opacity: 0;
         transition: max-width 0.3s ease, padding 0.2s ease, opacity 0.25s ease;
       }
+      .stats-panel:not(.is-collapsed) {
+        max-width: calc(100vw - 4px);
+      }
       .stats-panel:not(.is-collapsed) .stats-panel-body {
-        max-width: min(260px, calc(100vw - var(--mobile-burger-reserve) - 48px));
+        max-width: min(304px, calc(100vw - 44px));
         opacity: 1;
-        padding: 10px 12px 10px 8px;
+        padding: 10px 22px 12px 10px;
+        box-sizing: border-box;
       }
       .stats-panel .top-left-panels {
         position: static;
@@ -1030,7 +1039,7 @@
   <div class="stats-panel is-collapsed" id="stats-panel">
     <div class="stats-panel-toggle" id="stats-panel-toggle" title="Open / close stats">
       <span>Stats</span>
-      <svg class="stats-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <svg class="stats-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
     </div>
     <div class="stats-panel-body">
   <div class="top-left-panels">
