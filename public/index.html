@@ -432,6 +432,10 @@
         box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
         max-height: calc(100vh - var(--mobile-stats-top) - 24px);
       }
+      .stats-panel.is-collapsed {
+        width: fit-content;
+        max-width: none;
+      }
       .stats-panel-toggle {
         display: flex;
         flex-direction: column;
@@ -451,6 +455,22 @@
         letter-spacing: 0.05em;
         writing-mode: vertical-rl;
         text-orientation: mixed;
+        flex-shrink: 0;
+      }
+      .stats-panel.is-collapsed .stats-panel-toggle {
+        flex-direction: row;
+        writing-mode: horizontal-tb;
+        text-orientation: mixed;
+        width: auto;
+        min-height: 0;
+        height: auto;
+        padding: 8px 12px 8px 10px;
+        gap: 5px;
+        justify-content: center;
+        align-items: center;
+      }
+      .stats-panel.is-collapsed .stats-panel-toggle span {
+        line-height: 1;
       }
       .stats-panel-chevron {
         width: 14px;
@@ -473,16 +493,27 @@
         opacity: 0;
         transition: max-width 0.3s ease, padding 0.2s ease, opacity 0.25s ease;
       }
+      .stats-panel:not(.is-collapsed) {
+        width: auto;
+        max-width: calc(100vw - 6px);
+      }
       .stats-panel:not(.is-collapsed) .stats-panel-body {
-        max-width: min(260px, calc(100vw - var(--mobile-burger-reserve) - 48px));
+        max-width: min(292px, calc(100vw - 52px));
         opacity: 1;
-        padding: 10px 12px 10px 8px;
+        padding: 10px 18px 12px 10px;
+        box-sizing: border-box;
+      }
+      .stats-panel:not(.is-collapsed) .stats-panel-toggle {
+        min-height: 0;
+        align-self: stretch;
       }
       .stats-panel .top-left-panels {
         position: static;
         top: auto;
         left: auto;
         gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
       }
       .stats-panel .leaderboard {
         position: static;
@@ -491,12 +522,15 @@
         right: auto;
         max-width: none;
         min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
       }
       .stats-panel .last-joined,
       .stats-panel .top-scores,
       .stats-panel .leaderboard {
         min-width: 0;
         width: 100%;
+        box-sizing: border-box;
       }
       .stats-panel:not(.is-collapsed) .last-joined.is-collapsed .last-joined-list,
       .stats-panel:not(.is-collapsed) .top-scores.is-collapsed .top-scores-list,
