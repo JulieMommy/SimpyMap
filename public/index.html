@@ -223,17 +223,20 @@
     .other-dot-icon.top-scorer .other-dot::before {
       content: '★';
     }
-    /* Selected player: larger dot to preview skin */
+    /* Selected player: dot fills icon box so skin is visible */
+    .me-dot-icon.is-selected,
+    .other-dot-icon.is-selected {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+    }
     .me-dot-icon.is-selected .me-dot,
     .other-dot-icon.is-selected .other-dot {
-      transform: scale(1.55);
-      transform-origin: center center;
-      transition: transform 0.18s ease, filter 0.18s ease;
-      filter: drop-shadow(0 0 8px rgba(248, 250, 252, 0.65));
-    }
-    .me-dot-icon.is-selected.top-scorer .me-dot,
-    .other-dot-icon.is-selected.top-scorer .other-dot {
-      transform: scale(1.35);
+      width: 94% !important;
+      height: 94% !important;
+      transform: none;
+      transition: width 0.2s ease, height 0.2s ease, filter 0.2s ease;
+      filter: drop-shadow(0 0 10px rgba(248, 250, 252, 0.7));
     }
     /* Spawn animation: from 1% to 150% then back to 100% */
     .me-dot-icon.marker-spawn .me-dot,
@@ -385,6 +388,18 @@
       color: #cbd5f5;
       text-transform: uppercase;
       letter-spacing: 0.06em;
+    }
+    .leaflet-popup.player-popup--selected .leaflet-popup-content-wrapper {
+      margin-bottom: 4px;
+    }
+    .leaflet-popup.player-popup--selected .leaflet-popup-content {
+      margin: 6px 9px;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+    .leaflet-popup.player-popup--selected .popup-sub {
+      font-size: 10px;
+      margin-top: 1px;
     }
 
     /* Stats panel: invisible wrapper on desktop (panels keep their positions) */
@@ -1279,12 +1294,50 @@
       return ((Number(lng) + 180) / 360) * 1.2;
     }
 
+    const SELECTED_MARKER_SCALE = 2.75;
+
+    function getMarkerBaseSize(visits, isTopScorer) {
+      const bandNum = getVisitBandNumber(visits);
+      return isTopScorer ? 22 : 14 + (bandNum - 1);
+    }
+
+    function getMarkerIconSize(visits, isTopScorer, isSelected) {
+      const base = getMarkerBaseSize(visits, isTopScorer);
+      return isSelected ? Math.round(base * SELECTED_MARKER_SCALE) : base;
+    }
+
+    function getPopupOffset(visits, isTopScorer, isSelected) {
+      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
+      const lift = isSelected ? 22 : 10;
+      return L.point(0, -(Math.round(size / 2) + lift));
+    }
+
+    function bindPlayerPopup(marker, popupHtml, visits, isTopScorer, playerId) {
+      const isSelected = selectedPlayerId === playerId;
+      marker.bindPopup(popupHtml, {
+        offset: getPopupOffset(visits, isTopScorer, isSelected),
+        className: isSelected ? 'player-popup player-popup--selected' : 'player-popup'
+      });
+    }
+
+    function syncMarkerPopup(marker, playerId) {
+      const meta = playerMarkerMeta.get(playerId);
+      if (!marker || !meta) return;
+      const isSelected = selectedPlayerId === playerId;
+      const offset = getPopupOffset(meta.visits, meta.isTopScorer, isSelected);
+      const popup = marker.getPopup();
+      if (popup) {
+        popup.options.offset = offset;
+        popup.options.className = isSelected ? 'player-popup player-popup--selected' : 'player-popup';
+        if (marker.isPopupOpen()) popup.update();
+      }
+    }
+
     // Custom icons (color, pattern or image URL)
     function createMeIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const baseSize = isTopScorer ? 22 : 14 + (bandNum - 1);
-      const size = isSelected ? Math.round(baseSize * 1.55) : baseSize;
+      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
       const selectedClass = isSelected ? ' is-selected' : '';
@@ -1322,8 +1375,7 @@
     function createOtherIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const baseSize = isTopScorer ? 22 : 14 + (bandNum - 1);
-      const size = isSelected ? Math.round(baseSize * 1.55) : baseSize;
+      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
       const selectedClass = isSelected ? ' is-selected' : '';
@@ -1352,6 +1404,7 @@
       marker.setIcon(icon);
       const baseZ = meta.isMe ? 1000 : 0;
       marker.setZIndexOffset(isSelected ? baseZ + 1500 : baseZ);
+      syncMarkerPopup(marker, playerId);
     }
 
     function setSelectedPlayer(playerId) {
@@ -1372,8 +1425,14 @@
     function bindMarkerSelection(marker, playerId) {
       if (marker._selectionBound) return;
       marker._selectionBound = true;
-      marker.on('click', () => setSelectedPlayer(playerId));
-      marker.on('popupopen', () => setSelectedPlayer(playerId));
+      marker.on('click', () => {
+        setSelectedPlayer(playerId);
+        syncMarkerPopup(marker, playerId);
+      });
+      marker.on('popupopen', () => {
+        setSelectedPlayer(playerId);
+        syncMarkerPopup(marker, playerId);
+      });
       marker.on('popupclose', () => {
         if (selectedPlayerId === playerId) clearSelectedPlayer();
       });
@@ -1619,10 +1678,11 @@
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
                 userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
+                syncMarkerPopup(userMarker, key);
               } else {
                 userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
-                  .addTo(map)
-                  .bindPopup(popupHtml);
+                  .addTo(map);
+                bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
                 map.setView([u.lat, u.lng], 6);
               }
               bindMarkerSelection(userMarker, key);
@@ -1634,10 +1694,11 @@
                 marker.setPopupContent(popupHtml);
                 marker.setIcon(icon);
                 marker.setZIndexOffset(isSelected ? 1500 : 0);
+                syncMarkerPopup(marker, key);
               } else {
                 const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
-                  .addTo(map)
-                  .bindPopup(popupHtml);
+                  .addTo(map);
+                bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
                 otherMarkers.set(key, m);
                 bindMarkerSelection(m, key);
               }
@@ -1695,10 +1756,11 @@
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
                 userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
+                syncMarkerPopup(userMarker, key);
               } else {
                 userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
-                  .addTo(map)
-                  .bindPopup(popupHtml);
+                  .addTo(map);
+                bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
                 map.setView([u.lat, u.lng], 6);
               }
               bindMarkerSelection(userMarker, key);
@@ -1709,8 +1771,8 @@
               }
               const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
               const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
-                .addTo(map)
-                .bindPopup(popupHtml);
+                .addTo(map);
+              bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
               otherMarkers.set(key, m);
               bindMarkerSelection(m, key);
             }
