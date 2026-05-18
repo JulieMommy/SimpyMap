@@ -223,6 +223,18 @@
     .other-dot-icon.top-scorer .other-dot::before {
       content: '★';
     }
+    /* Selected player: larger dot to preview skin */
+    .me-dot-icon.is-selected .me-dot,
+    .other-dot-icon.is-selected .other-dot {
+      transform: scale(1.55);
+      transform-origin: center center;
+      transition: transform 0.18s ease, filter 0.18s ease;
+      filter: drop-shadow(0 0 8px rgba(248, 250, 252, 0.65));
+    }
+    .me-dot-icon.is-selected.top-scorer .me-dot,
+    .other-dot-icon.is-selected.top-scorer .other-dot {
+      transform: scale(1.35);
+    }
     /* Spawn animation: from 1% to 150% then back to 100% */
     .me-dot-icon.marker-spawn .me-dot,
     .other-dot-icon.marker-spawn .other-dot {
@@ -996,6 +1008,14 @@
       background: rgba(148, 163, 255, 0.2);
       opacity: 0.9;
     }
+    .skin-list-divider {
+      list-style: none;
+      margin: 10px 0 8px;
+      padding: 0;
+      height: 0;
+      border: none;
+      border-top: 1px solid rgba(148, 163, 255, 0.28);
+    }
     .skin-item-requirement {
       font-size: 10px;
       color: rgba(248, 250, 252, 0.5);
@@ -1159,6 +1179,7 @@
     ];
     let fixedImageSkins = []; // filled by GET /api/skins (backend-defined image URLs, read-only)
     let unlockedExternalSkins = []; // e.g. ['Drone', 'blacked', 'Spiral'] when unlocked
+    let unlockedHiddenSkins = []; // e.g. [{ id: 'hidden:JULIEPFP', name, imageUrl }]
     const PAID_SKIN_IDS = ['Drone', 'blacked', 'Spiral'];
     const PAID_SKIN_LABELS = { Drone: 'Become a Drone', blacked: '5 €', Spiral: '5 €' };
     function isSkinUrl(s) {
@@ -1173,7 +1194,11 @@
       return s ? s.imageUrl : null;
     }
     function canUseSkin(skinId, score) {
-      if (resolveHiddenSkinUrl(skinId)) return true;
+      if (resolveHiddenSkinUrl(skinId)) {
+        const norm = normalizeHiddenSkinId(skinId);
+        return unlockedHiddenSkins.some((s) => s.id === norm)
+          || unlockedExternalSkins.some((uid) => normalizeHiddenSkinId(uid) === norm);
+      }
       if (isSkinUrl(skinId)) return true;
       if (PAID_SKIN_IDS.includes(skinId)) return unlockedExternalSkins.includes(skinId);
       if (isFixedImageSkin(skinId)) return true;
@@ -1191,7 +1216,7 @@
       const s = SKINS.find((x) => x.id === (skinId || 'red'));
       return (s && s.hex) ? s.hex : '#b91c1c';
     }
-    /** hidden:MySkin → /skins/hidden/MySkin.png (not shown in skin panel) */
+    /** hidden:MySkin → /skins/hidden/MySkin.png (panel only if external_unlock) */
     function resolveHiddenSkinUrl(skinId) {
       const id = String(skinId || '').trim();
       if (!id) return null;
@@ -1205,6 +1230,13 @@
       if (!base) return null;
       if (/\.(png|jpe?g|gif|webp)$/i.test(base)) return `/skins/hidden/${base}`;
       return `/skins/hidden/${base}.png`;
+    }
+    function normalizeHiddenSkinId(skinId) {
+      const url = resolveHiddenSkinUrl(skinId);
+      if (!url) return null;
+      const base = url.replace(/^\/skins\/hidden\//, '').split('?')[0];
+      const name = base.replace(/\.(png|jpe?g|gif|webp)$/i, '');
+      return name ? `hidden:${name}` : null;
     }
     function getSkinStyle(skinId) {
       const id = (skinId && String(skinId).trim()) || 'red';
@@ -1248,18 +1280,21 @@
     }
 
     // Custom icons (color, pattern or image URL)
-    function createMeIcon(visits, lng, isTopScorer, skinId) {
+    function createMeIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const size = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const baseSize = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const size = isSelected ? Math.round(baseSize * 1.55) : baseSize;
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
+      const selectedClass = isSelected ? ' is-selected' : '';
+      const spawnClass = isSelected ? '' : ' marker-spawn';
       const skin = getSkinStyle(skinId);
       const ringShadow = getRingShadow(skin.ringColor, bandNum);
       const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
-        className: `me-dot-icon ${bandClass}${topClass} marker-spawn`,
+        className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
         html: `<div class="me-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
@@ -1284,26 +1319,75 @@
       return 6;
     }
 
-    function createOtherIcon(visits, lng, isTopScorer, skinId) {
+    function createOtherIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const size = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const baseSize = isTopScorer ? 22 : 14 + (bandNum - 1);
+      const size = isSelected ? Math.round(baseSize * 1.55) : baseSize;
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
+      const selectedClass = isSelected ? ' is-selected' : '';
+      const spawnClass = isSelected ? '' : ' marker-spawn';
       const skin = getSkinStyle(skinId);
       const ringShadow = getRingShadow(skin.ringColor, bandNum);
       const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
-        className: `other-dot-icon ${bandClass}${topClass} marker-spawn`,
+        className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
         html: `<div class="other-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
     }
 
+    function refreshMarkerIcon(playerId) {
+      const meta = playerMarkerMeta.get(playerId);
+      if (!meta) return;
+      const isSelected = selectedPlayerId === playerId;
+      const icon = meta.isMe
+        ? createMeIcon(meta.visits, meta.lng, meta.isTopScorer, meta.skinId, isSelected)
+        : createOtherIcon(meta.visits, meta.lng, meta.isTopScorer, meta.skinId, isSelected);
+      const marker = meta.isMe ? userMarker : otherMarkers.get(playerId);
+      if (!marker) return;
+      marker.setIcon(icon);
+      const baseZ = meta.isMe ? 1000 : 0;
+      marker.setZIndexOffset(isSelected ? baseZ + 1500 : baseZ);
+    }
+
+    function setSelectedPlayer(playerId) {
+      if (selectedPlayerId === playerId) return;
+      const prev = selectedPlayerId;
+      selectedPlayerId = playerId;
+      if (prev) refreshMarkerIcon(prev);
+      if (playerId) refreshMarkerIcon(playerId);
+    }
+
+    function clearSelectedPlayer() {
+      if (!selectedPlayerId) return;
+      const prev = selectedPlayerId;
+      selectedPlayerId = null;
+      refreshMarkerIcon(prev);
+    }
+
+    function bindMarkerSelection(marker, playerId) {
+      if (marker._selectionBound) return;
+      marker._selectionBound = true;
+      marker.on('click', () => setSelectedPlayer(playerId));
+      marker.on('popupopen', () => setSelectedPlayer(playerId));
+      marker.on('popupclose', () => {
+        if (selectedPlayerId === playerId) clearSelectedPlayer();
+      });
+    }
+
+    map.on('click', () => {
+      if (map._popup && map._popup.isOpen()) return;
+      clearSelectedPlayer();
+    });
+
     let userMarker = null;
     const otherMarkers = new Map(); // id -> marker
+    const playerMarkerMeta = new Map(); // id -> { visits, lng, isTopScorer, skinId, isMe }
+    let selectedPlayerId = null;
     const userSkinsCache = new Map(); // id -> skin (filled by loadAllPositions, used by leaderboard)
     let currentSkin = (localStorage.getItem('skin') || 'red').trim();
     let myVisits = 1, myLng = 0, amTopScorer = false;
@@ -1512,6 +1596,8 @@
             const visits = typeof u.visits === 'number' ? u.visits : 1;
             const popupHtml = getPopupHtml(displayName, visits, isMe);
             const isTopScorer = topScorerIds.has(key);
+            playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
+            const isSelected = selectedPlayerId === key;
             if (isMe) {
               myVisits = visits;
               myLng = u.lng;
@@ -1527,29 +1613,33 @@
                 currentSkin = skinId;
                 localStorage.setItem('skin', skinId);
               }
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId);
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId, isSelected);
               if (userMarker) {
                 userMarker.setLatLng([u.lat, u.lng]);
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
+                userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
               } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
                   .addTo(map)
                   .bindPopup(popupHtml);
                 map.setView([u.lat, u.lng], 6);
               }
+              bindMarkerSelection(userMarker, key);
             } else {
-              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId);
+              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
               if (otherMarkers.has(key)) {
                 const marker = otherMarkers.get(key);
                 marker.setLatLng([u.lat, u.lng]);
                 marker.setPopupContent(popupHtml);
                 marker.setIcon(icon);
+                marker.setZIndexOffset(isSelected ? 1500 : 0);
               } else {
-                const m = L.marker([u.lat, u.lng], { title: displayName, icon })
+                const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
                   .addTo(map)
                   .bindPopup(popupHtml);
                 otherMarkers.set(key, m);
+                bindMarkerSelection(m, key);
               }
             }
           });
@@ -1582,6 +1672,8 @@
             const visits = typeof u.visits === 'number' ? u.visits : 1;
             const popupHtml = getPopupHtml(displayName, visits, isMe);
             const isTopScorer = topScorerIds.has(key);
+            playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
+            const isSelected = selectedPlayerId === key;
             if (isMe) {
               myVisits = visits;
               myLng = u.lng;
@@ -1597,24 +1689,30 @@
                 currentSkin = skinId;
                 localStorage.setItem('skin', skinId);
               }
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId);
+              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId, isSelected);
               if (userMarker) {
                 userMarker.setLatLng([u.lat, u.lng]);
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
+                userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
               } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: 1000 })
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
                   .addTo(map)
                   .bindPopup(popupHtml);
                 map.setView([u.lat, u.lng], 6);
               }
+              bindMarkerSelection(userMarker, key);
             } else {
-              if (otherMarkers.has(key)) return; // déjà affiché, on ne touche pas
-              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId);
-              const m = L.marker([u.lat, u.lng], { title: displayName, icon })
+              if (otherMarkers.has(key)) {
+                if (selectedPlayerId === key) refreshMarkerIcon(key);
+                return;
+              }
+              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
+              const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
                 .addTo(map)
                 .bindPopup(popupHtml);
               otherMarkers.set(key, m);
+              bindMarkerSelection(m, key);
             }
           });
         })
@@ -1866,6 +1964,14 @@
         }
         html += `<li class="skin-item${active}${lockClass}" data-skin-id="${escapeHtml(blacked.id)}" data-locked="${locked}" title="${escapeHtml(title)}"><span class="${dotClass}"${dotStyle}></span><span class="skin-item-name">${escapeHtml(blacked.name)}</span>${reqHtml}</li>`;
       }
+      if (unlockedHiddenSkins.length > 0) {
+        html += '<li class="skin-list-divider" aria-hidden="true"></li>';
+        unlockedHiddenSkins.forEach((s) => {
+          const active = s.id === currentSkin ? ' is-active' : '';
+          const dotStyle = ` style="background-image:url(${String(s.imageUrl).replace(/"/g, '&quot;').replace(/'/g, '%27')});background-size:cover;background-color:#334155"`;
+          html += `<li class="skin-item${active}" data-skin-id="${escapeHtml(s.id)}" data-locked="false" title="${escapeHtml(s.name)}"><span class="skin-item-dot"${dotStyle}></span><span class="skin-item-name">${escapeHtml(s.name)}</span></li>`;
+        });
+      }
       list.innerHTML = html;
     }
     function setupSkinPanel() {
@@ -1878,8 +1984,9 @@
         fetch(`/api/skins?userId=${encodeURIComponent(userId)}`).then((r) => r.json()).then((data) => {
           fixedImageSkins = data.fixedImageSkins || [];
           unlockedExternalSkins = data.unlockedExternalSkins || [];
+          unlockedHiddenSkins = data.unlockedHiddenSkins || [];
           renderSkinList();
-        }).catch(() => { fixedImageSkins = []; unlockedExternalSkins = []; renderSkinList(); });
+        }).catch(() => { fixedImageSkins = []; unlockedExternalSkins = []; unlockedHiddenSkins = []; renderSkinList(); });
       }
       loadSkins();
       list.addEventListener('click', (e) => {
@@ -1909,7 +2016,7 @@
         currentSkin = id;
         localStorage.setItem('skin', id);
         renderSkinList();
-        if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin));
+        if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin, selectedPlayerId === userId));
         fetch('/api/set-skin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1921,7 +2028,7 @@
               currentSkin = previousSkin;
               localStorage.setItem('skin', currentSkin);
               renderSkinList();
-              if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin));
+              if (userMarker) userMarker.setIcon(createMeIcon(myVisits, myLng, amTopScorer, currentSkin, selectedPlayerId === userId));
             }
           }).catch(() => {});
         }).catch(() => {

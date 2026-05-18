@@ -71,6 +71,38 @@ function resolveHiddenSkinUrl(skinId) {
   return null;
 }
 
+function normalizeHiddenSkinId(skinId) {
+  const url = resolveHiddenSkinUrl(skinId);
+  if (!url) return null;
+  const base = path.basename(url, path.extname(url));
+  return base ? `hidden:${base}` : null;
+}
+
+function hiddenSkinDisplayName(normalizedId) {
+  const base = String(normalizedId || '').replace(/^hidden:/, '');
+  if (!base) return 'Secret';
+  return base.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getHiddenSkinEntry(skinId) {
+  const id = normalizeHiddenSkinId(skinId);
+  if (!id) return null;
+  const imageUrl = resolveHiddenSkinUrl(id);
+  if (!imageUrl) return null;
+  return { id, name: hiddenSkinDisplayName(id), imageUrl };
+}
+
+async function userHasHiddenSkinUnlock(userId, skinId) {
+  if (!userId) return false;
+  const target = normalizeHiddenSkinId(skinId);
+  if (!target) return false;
+  const { rows } = await pool.query(
+    'SELECT "skinId" FROM external_unlocks WHERE "userId" = $1',
+    [userId]
+  );
+  return rows.some((r) => normalizeHiddenSkinId(r.skinId) === target);
+}
+
 function getFixedImageSkins() {
   try {
     if (!fs.existsSync(SKINS_DIR)) return [];
@@ -115,7 +147,7 @@ async function canUseSkin(skinId, userScore, userId) {
   if (!skinId) return true;
   const id = String(skinId).trim();
   if (id.startsWith('http://') || id.startsWith('https://')) return false;
-  if (resolveHiddenSkinUrl(id)) return true;
+  if (resolveHiddenSkinUrl(id)) return await userHasHiddenSkinUnlock(userId, id);
   if (PAID_SKINS.includes(id)) {
     if (!userId) return false;
     const { rows } = await pool.query(
@@ -134,15 +166,24 @@ async function canUseSkin(skinId, userScore, userId) {
 app.get('/api/skins', async (req, res) => {
   const userId = (req.query.userId || '').toString().trim();
   const fixedImageSkins = getFixedImageSkins();
-  if (!userId) return res.json({ fixedImageSkins, unlockedExternalSkins: [] });
+  if (!userId) return res.json({ fixedImageSkins, unlockedExternalSkins: [], unlockedHiddenSkins: [] });
   try {
     const { rows } = await pool.query(
       'SELECT "skinId" FROM external_unlocks WHERE "userId" = $1',
       [userId]
     );
+    const seenHidden = new Set();
+    const unlockedHiddenSkins = [];
+    rows.forEach((r) => {
+      const entry = getHiddenSkinEntry(r.skinId);
+      if (!entry || seenHidden.has(entry.id)) return;
+      seenHidden.add(entry.id);
+      unlockedHiddenSkins.push(entry);
+    });
     res.json({
       fixedImageSkins,
-      unlockedExternalSkins: rows.map((r) => r.skinId)
+      unlockedExternalSkins: rows.map((r) => r.skinId),
+      unlockedHiddenSkins
     });
   } catch (err) {
     console.error('DB error:', err);
