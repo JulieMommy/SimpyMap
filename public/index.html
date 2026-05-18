@@ -423,7 +423,7 @@
         left: 0;
         z-index: 1000;
         display: flex;
-        align-items: flex-start;
+        align-items: stretch;
         background: rgba(15, 23, 42, 0.92);
         border: 1px solid rgba(148, 163, 255, 0.25);
         border-left: none;
@@ -432,6 +432,10 @@
         box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
         max-height: calc(100vh - var(--mobile-stats-top) - 24px);
       }
+      .stats-panel.is-collapsed {
+        width: fit-content;
+        align-items: stretch;
+      }
       .stats-panel-toggle {
         display: flex;
         flex-direction: column;
@@ -439,8 +443,8 @@
         justify-content: center;
         gap: 6px;
         width: 40px;
-        min-height: 72px;
-        padding: 10px 8px;
+        min-height: 0;
+        padding: 12px 8px;
         cursor: pointer;
         user-select: none;
         -webkit-tap-highlight-color: transparent;
@@ -451,6 +455,24 @@
         letter-spacing: 0.05em;
         writing-mode: vertical-rl;
         text-orientation: mixed;
+        flex-shrink: 0;
+        box-sizing: border-box;
+      }
+      .stats-panel.is-collapsed .stats-panel-toggle {
+        flex-direction: column;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        justify-content: center;
+        align-items: center;
+        align-self: stretch;
+        width: 40px;
+        min-height: 56px;
+        height: auto;
+        padding: 12px 8px;
+      }
+      .stats-panel:not(.is-collapsed) .stats-panel-toggle {
+        min-height: 72px;
+        align-self: stretch;
       }
       .stats-panel-chevron {
         width: 14px;
