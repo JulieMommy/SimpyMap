@@ -275,8 +275,8 @@
     }
     .me-dot-icon.top-scorer.is-selected .top-scorer-wrap,
     .other-dot-icon.top-scorer.is-selected .top-scorer-wrap {
-      width: 94% !important;
-      height: 94% !important;
+      width: 100% !important;
+      height: 100% !important;
       filter: drop-shadow(0 0 10px rgba(248, 250, 252, 0.7));
     }
     /* Spawn animation: from 1% to 150% then back to 100% */
@@ -1380,11 +1380,12 @@
     }
 
 
-    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer, visits) {
+    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer, visits, isSelected) {
       if (!isTopScorer) {
         return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${style}"></div>`;
       }
-      const { coreSize } = getTopScorerLayout(visits);
+      let { coreSize } = getTopScorerLayout(visits);
+      if (isSelected) coreSize = Math.round(coreSize * SELECTED_MARKER_SCALE);
       const coreStyle = `${style};width:${coreSize}px;height:${coreSize}px;min-width:${coreSize}px;min-height:${coreSize}px;`;
       return `<div class="top-scorer-wrap"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${coreStyle}"></div></div>`;
     }
@@ -1404,7 +1405,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer, visits),
+        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer, visits, isSelected),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
@@ -1442,7 +1443,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer, visits),
+        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer, visits, isSelected),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
