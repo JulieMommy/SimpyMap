@@ -247,12 +247,11 @@
     .top-scorer-core {
       position: absolute;
       left: 50%;
-      top: 52%;
+      top: 50%;
       transform: translate(-50%, -50%);
-      width: 54% !important;
-      height: 54% !important;
       border-radius: 50%;
       z-index: 1;
+      box-sizing: border-box;
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
     }
     .me-dot-icon.top-scorer .top-scorer-core.skin-dot.pattern-blacked::before,
@@ -1333,16 +1332,24 @@
     }
 
     const SELECTED_MARKER_SCALE = 3.5;
+    const TOP_SCORER_CORE_EXTRA_PX = 5;
+    const TOP_SCORER_STAR_SCALE = 2;
 
-    function getMarkerBaseSize(visits, isTopScorer) {
+    function getNormalDotSize(visits) {
       const bandNum = getVisitBandNumber(visits);
-      const base = 14 + (bandNum - 1);
-      return isTopScorer ? base + 10 : base;
+      return 14 + (bandNum - 1);
+    }
+
+    function getTopScorerLayout(visits) {
+      const normalDot = getNormalDotSize(visits);
+      const coreSize = normalDot + TOP_SCORER_CORE_EXTRA_PX;
+      const starSize = Math.round(coreSize * TOP_SCORER_STAR_SCALE);
+      return { normalDot, coreSize, starSize };
     }
 
     function getMarkerIconSize(visits, isTopScorer, isSelected) {
-      const base = getMarkerBaseSize(visits, isTopScorer);
-      return isSelected ? Math.round(base * SELECTED_MARKER_SCALE) : base;
+      const size = isTopScorer ? getTopScorerLayout(visits).starSize : getNormalDotSize(visits);
+      return isSelected ? Math.round(size * SELECTED_MARKER_SCALE) : size;
     }
 
     function getPopupOffset(visits, isTopScorer, isSelected) {
@@ -1373,11 +1380,13 @@
     }
 
 
-    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer) {
+    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer, visits) {
       if (!isTopScorer) {
         return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${style}"></div>`;
       }
-      return `<div class="top-scorer-wrap"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${style}"></div></div>`;
+      const { coreSize } = getTopScorerLayout(visits);
+      const coreStyle = `${style};width:${coreSize}px;height:${coreSize}px;min-width:${coreSize}px;min-height:${coreSize}px;`;
+      return `<div class="top-scorer-wrap"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${coreStyle}"></div></div>`;
     }
 
     // Custom icons (color, pattern or image URL)
@@ -1395,7 +1404,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer),
+        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer, visits),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
@@ -1433,7 +1442,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer),
+        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer, visits),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
@@ -1630,7 +1639,6 @@
             .map((u, i) => {
               const name = escapeHtml(u.username || 'Guest');
               const isMe = String(u.id) === String(userId);
-              const isTop = i === 0;
               const skinFromApi = (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : null;
               const skin = skinFromApi || (isMe ? currentSkin : (userSkinsCache.get(u.id) || 'red'));
               const skinStyle = getSkinStyle(skin);
@@ -1639,9 +1647,8 @@
                 : skinStyle.extraClass
                   ? `<div class="point-dot ${skinStyle.extraClass}"></div>`
                   : `<div class="point-dot" style="background:${getSkinColor(skin)} !important"></div>`;
-              const pointHtml = isTop && !isMe ? '<span class="point-star">★</span>' : dotHtml;
               const meClass = isMe ? ' is-me' : '';
-              return `<li class="top-scores-item${meClass}">${pointHtml}<span class="name">${name}</span><span class="score">${u.score}</span></li>`;
+              return `<li class="top-scores-item${meClass}">${dotHtml}<span class="name">${name}</span><span class="score">${u.score}</span></li>`;
             })
             .join('');
           if (you) {
