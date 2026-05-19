@@ -202,12 +202,22 @@
       height: 19px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 11px rgba(244, 114, 182, 0.5);
     }
-    /* Top score: star shape, skin/color unchanged inside */
-    .me-dot-icon.top-scorer .me-dot,
-    .other-dot-icon.top-scorer .other-dot {
-      width: 100% !important;
-      height: 100% !important;
-      border-radius: 0;
+    /* Top score: golden star + skin circle in the center */
+    .me-dot-icon.top-scorer,
+    .other-dot-icon.top-scorer {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+    }
+    .top-scorer-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    .top-scorer-gold {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(160deg, #fef9c3 0%, #fde047 28%, #f59e0b 55%, #b45309 88%, #fef08a 100%);
       clip-path: polygon(
         50% 0%,
         61% 35%,
@@ -232,9 +242,21 @@
         2% 35%,
         39% 35%
       );
+      filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.45));
     }
-    .me-dot-icon.top-scorer .skin-dot.pattern-blacked::before,
-    .other-dot-icon.top-scorer .skin-dot.pattern-blacked::before {
+    .top-scorer-core {
+      position: absolute;
+      left: 50%;
+      top: 52%;
+      transform: translate(-50%, -50%);
+      width: 54% !important;
+      height: 54% !important;
+      border-radius: 50%;
+      z-index: 1;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+    }
+    .me-dot-icon.top-scorer .top-scorer-core.skin-dot.pattern-blacked::before,
+    .other-dot-icon.top-scorer .top-scorer-core.skin-dot.pattern-blacked::before {
       content: '\2660';
     }
     /* Selected player: dot fills icon box so skin is visible */
@@ -244,17 +266,25 @@
       align-items: center;
       justify-content: center;
     }
-    .me-dot-icon.is-selected .me-dot,
-    .other-dot-icon.is-selected .other-dot {
+    .me-dot-icon.is-selected .me-dot:not(.top-scorer-core),
+    .other-dot-icon.is-selected .other-dot:not(.top-scorer-core) {
       width: 94% !important;
       height: 94% !important;
       transform: none;
       transition: width 0.2s ease, height 0.2s ease, filter 0.2s ease;
       filter: drop-shadow(0 0 10px rgba(248, 250, 252, 0.7));
     }
+    .me-dot-icon.top-scorer.is-selected .top-scorer-wrap,
+    .other-dot-icon.top-scorer.is-selected .top-scorer-wrap {
+      width: 94% !important;
+      height: 94% !important;
+      filter: drop-shadow(0 0 10px rgba(248, 250, 252, 0.7));
+    }
     /* Spawn animation: from 1% to 150% then back to 100% */
-    .me-dot-icon.marker-spawn .me-dot,
-    .other-dot-icon.marker-spawn .other-dot {
+    .me-dot-icon.marker-spawn .me-dot:not(.top-scorer-core),
+    .other-dot-icon.marker-spawn .other-dot:not(.top-scorer-core),
+    .me-dot-icon.top-scorer.marker-spawn .top-scorer-wrap,
+    .other-dot-icon.top-scorer.marker-spawn .top-scorer-wrap {
       transform-origin: center;
       animation: marker-spawn 1s ease-out forwards;
     }
@@ -1307,7 +1337,7 @@
     function getMarkerBaseSize(visits, isTopScorer) {
       const bandNum = getVisitBandNumber(visits);
       const base = 14 + (bandNum - 1);
-      return isTopScorer ? base + 5 : base;
+      return isTopScorer ? base + 10 : base;
     }
 
     function getMarkerIconSize(visits, isTopScorer, isSelected) {
@@ -1342,6 +1372,14 @@
       }
     }
 
+
+    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer) {
+      if (!isTopScorer) {
+        return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${style}"></div>`;
+      }
+      return `<div class="top-scorer-wrap"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${style}"></div></div>`;
+    }
+
     // Custom icons (color, pattern or image URL)
     function createMeIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
@@ -1357,7 +1395,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: `<div class="me-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
+        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
@@ -1395,7 +1433,7 @@
       const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
       return L.divIcon({
         className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: `<div class="other-dot skin-dot ${skin.extraClass}" style="${style}"></div>`,
+        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
