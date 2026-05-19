@@ -202,26 +202,40 @@
       height: 19px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 11px rgba(244, 114, 182, 0.5);
     }
-    /* Top score: yellow star */
+    /* Top score: star shape, skin/color unchanged inside */
     .me-dot-icon.top-scorer .me-dot,
     .other-dot-icon.top-scorer .other-dot {
-      width: 22px;
-      height: 22px;
+      width: 100% !important;
+      height: 100% !important;
       border-radius: 0;
-      background: none;
-      box-shadow: none;
-      font-size: 24px;
-      line-height: 22px;
-      text-align: center;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fef08a;
-      text-shadow: 0 0 8px rgba(254, 240, 138, 0.8), 0 1px 3px rgba(0, 0, 0, 0.5);
+      clip-path: polygon(
+        50% 0%,
+        61% 35%,
+        98% 35%,
+        68% 57%,
+        79% 91%,
+        50% 70%,
+        21% 91%,
+        32% 57%,
+        2% 35%,
+        39% 35%
+      );
+      -webkit-clip-path: polygon(
+        50% 0%,
+        61% 35%,
+        98% 35%,
+        68% 57%,
+        79% 91%,
+        50% 70%,
+        21% 91%,
+        32% 57%,
+        2% 35%,
+        39% 35%
+      );
     }
-    .me-dot-icon.top-scorer .me-dot::before,
-    .other-dot-icon.top-scorer .other-dot::before {
-      content: '★';
+    .me-dot-icon.top-scorer .skin-dot.pattern-blacked::before,
+    .other-dot-icon.top-scorer .skin-dot.pattern-blacked::before {
+      content: '\2660';
     }
     /* Selected player: dot fills icon box so skin is visible */
     .me-dot-icon.is-selected,
@@ -1039,12 +1053,6 @@
     .skin-item.is-locked .skin-item-requirement {
       color: rgba(248, 113, 113, 0.9);
     }
-    .me-dot-icon.top-scorer .skin-dot,
-    .other-dot-icon.top-scorer .skin-dot {
-      background: none !important;
-      background-image: none !important;
-      box-shadow: none !important;
-    }
   </style>
 </head>
 <body>
@@ -1298,7 +1306,8 @@
 
     function getMarkerBaseSize(visits, isTopScorer) {
       const bandNum = getVisitBandNumber(visits);
-      return isTopScorer ? 22 : 14 + (bandNum - 1);
+      const base = 14 + (bandNum - 1);
+      return isTopScorer ? base + 5 : base;
     }
 
     function getMarkerIconSize(visits, isTopScorer, isSelected) {
@@ -2056,8 +2065,8 @@
         if (!item) return;
         const id = item.getAttribute('data-skin-id');
         if (!id) return;
-        // Skins payants: clic ouvre la page externe, ils restent verrouillés
-        if (id === 'blacked' || id === 'Spiral') {
+        // Skins payants Throne : lien seulement si pas encore débloqué
+        if ((id === 'blacked' || id === 'Spiral') && !canUseSkin(id, myVisits)) {
           window.open('https://www.julie.click/', '_blank');
           return;
         }
