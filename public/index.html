@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SympyMap - Julie&apos;s World</title>
+  <title>SimpyMap - Julie&apos;s World</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -1401,14 +1401,26 @@
     }
 
 
-    function buildMarkerDotHtml(dotClass, skin, style, isTopScorer, visits, isSelected) {
+    function buildMarkerDotInlineStyle(skin, bandNum, spawnDelaySec, isTopScorer) {
+      const ringShadow = getRingShadow(skin.ringColor, bandNum);
+      const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
+      const shadowPart = `box-shadow:${baseShadow}${ringShadow}`;
+      if (isTopScorer) {
+        return skin.style ? `${skin.style};${shadowPart}` : shadowPart;
+      }
+      const delayPart = `animation-delay:${spawnDelaySec}s;`;
+      return skin.style ? `${delayPart}${skin.style};${shadowPart}` : `${delayPart}${shadowPart}`;
+    }
+
+    function buildMarkerDotHtml(dotClass, skin, dotStyle, isTopScorer, visits, isSelected, spawnDelaySec) {
       if (!isTopScorer) {
-        return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${style}"></div>`;
+        return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${dotStyle}"></div>`;
       }
       let { coreSize } = getTopScorerLayout(visits);
       if (isSelected) coreSize = Math.round(coreSize * SELECTED_MARKER_SCALE);
-      const coreStyle = `${style};width:${coreSize}px;height:${coreSize}px;min-width:${coreSize}px;min-height:${coreSize}px;`;
-      return `<div class="top-scorer-wrap"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${coreStyle}"></div></div>`;
+      const wrapStyle = `animation-delay:${spawnDelaySec}s;`;
+      const coreStyle = `${dotStyle};width:${coreSize}px;height:${coreSize}px;min-width:${coreSize}px;min-height:${coreSize}px;`;
+      return `<div class="top-scorer-wrap" style="${wrapStyle}"><span class="top-scorer-gold" aria-hidden="true"></span><div class="${dotClass} top-scorer-core skin-dot ${skin.extraClass}" style="${coreStyle}"></div></div>`;
     }
 
     // Custom icons (color, pattern or image URL)
@@ -1421,12 +1433,10 @@
       const selectedClass = isSelected ? ' is-selected' : '';
       const spawnClass = isSelected ? '' : ' marker-spawn';
       const skin = getSkinStyle(skinId);
-      const ringShadow = getRingShadow(skin.ringColor, bandNum);
-      const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
-      const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
+      const dotStyle = buildMarkerDotInlineStyle(skin, bandNum, delay, isTopScorer);
       return L.divIcon({
         className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('me-dot', skin, style, isTopScorer, visits, isSelected),
+        html: buildMarkerDotHtml('me-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
@@ -1459,12 +1469,10 @@
       const selectedClass = isSelected ? ' is-selected' : '';
       const spawnClass = isSelected ? '' : ' marker-spawn';
       const skin = getSkinStyle(skinId);
-      const ringShadow = getRingShadow(skin.ringColor, bandNum);
-      const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
-      const style = skin.style ? `animation-delay: ${delay}s; ${skin.style}; box-shadow: ${baseShadow}${ringShadow}` : `animation-delay: ${delay}s; box-shadow: ${baseShadow}${ringShadow}`;
+      const dotStyle = buildMarkerDotInlineStyle(skin, bandNum, delay, isTopScorer);
       return L.divIcon({
         className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('other-dot', skin, style, isTopScorer, visits, isSelected),
+        html: buildMarkerDotHtml('other-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
