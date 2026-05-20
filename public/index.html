@@ -1352,6 +1352,27 @@
       return isSelected ? Math.round(size * SELECTED_MARKER_SCALE) : size;
     }
 
+    const Z_MARKER_SCORE_MULT = 10;
+    const Z_MARKER_ME_BONUS = 500;
+    const Z_MARKER_SELECTED_BONUS = 2000;
+
+    function getMarkerZIndexOffset(visits, isMe, isSelected) {
+      const score = Math.max(0, typeof visits === 'number' ? visits : 0);
+      let z = score * Z_MARKER_SCORE_MULT;
+      if (isMe) z += Z_MARKER_ME_BONUS;
+      if (isSelected) z += Z_MARKER_SELECTED_BONUS;
+      return z;
+    }
+
+    function sortPlayersByScoreAsc(users) {
+      users.sort((a, b) => {
+        const va = typeof a.visits === 'number' ? a.visits : 0;
+        const vb = typeof b.visits === 'number' ? b.visits : 0;
+        return va - vb;
+      });
+      return users;
+    }
+
     function getPopupOffset(visits, isTopScorer, isSelected) {
       const size = getMarkerIconSize(visits, isTopScorer, isSelected);
       const gap = isSelected ? 6 : 8;
@@ -1459,8 +1480,7 @@
       const marker = meta.isMe ? userMarker : otherMarkers.get(playerId);
       if (!marker) return;
       marker.setIcon(icon);
-      const baseZ = meta.isMe ? 1000 : 0;
-      marker.setZIndexOffset(isSelected ? baseZ + 1500 : baseZ);
+      marker.setZIndexOffset(getMarkerZIndexOffset(meta.visits, meta.isMe, isSelected));
       syncMarkerPopup(marker, playerId);
     }
 
@@ -1700,6 +1720,7 @@
           updateTopBarVisitors(valid.length);
           const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
           const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+          sortPlayersByScoreAsc(valid);
 
           valid.forEach((u) => {
             const isMe = u.id === userId;
@@ -1712,6 +1733,7 @@
             const isTopScorer = topScorerIds.has(key);
             playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
             const isSelected = selectedPlayerId === key;
+            const z = getMarkerZIndexOffset(visits, isMe, isSelected);
             if (isMe) {
               myVisits = visits;
               myLng = u.lng;
@@ -1732,10 +1754,10 @@
                 userMarker.setLatLng([u.lat, u.lng]);
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
-                userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
+                userMarker.setZIndexOffset(z);
                 syncMarkerPopup(userMarker, key);
               } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
                   .addTo(map);
                 bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
                 map.setView([u.lat, u.lng], 6);
@@ -1748,10 +1770,10 @@
                 marker.setLatLng([u.lat, u.lng]);
                 marker.setPopupContent(popupHtml);
                 marker.setIcon(icon);
-                marker.setZIndexOffset(isSelected ? 1500 : 0);
+                marker.setZIndexOffset(z);
                 syncMarkerPopup(marker, key);
               } else {
-                const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
+                const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: z })
                   .addTo(map);
                 bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
                 otherMarkers.set(key, m);
@@ -1778,6 +1800,7 @@
           updateTopBarVisitors(valid.length);
           const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
           const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+          sortPlayersByScoreAsc(valid);
 
           valid.forEach((u) => {
             const isMe = u.id === userId;
@@ -1790,6 +1813,7 @@
             const isTopScorer = topScorerIds.has(key);
             playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
             const isSelected = selectedPlayerId === key;
+            const z = getMarkerZIndexOffset(visits, isMe, isSelected);
             if (isMe) {
               myVisits = visits;
               myLng = u.lng;
@@ -1810,10 +1834,10 @@
                 userMarker.setLatLng([u.lat, u.lng]);
                 userMarker.setPopupContent(popupHtml);
                 userMarker.setIcon(meIcon);
-                userMarker.setZIndexOffset(isSelected ? 2500 : 1000);
+                userMarker.setZIndexOffset(z);
                 syncMarkerPopup(userMarker, key);
               } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: isSelected ? 2500 : 1000 })
+                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
                   .addTo(map);
                 bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
                 map.setView([u.lat, u.lng], 6);
@@ -1825,7 +1849,7 @@
                 return;
               }
               const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
-              const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: isSelected ? 1500 : 0 })
+              const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: z })
                 .addTo(map);
               bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
               otherMarkers.set(key, m);
