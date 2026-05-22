@@ -1706,90 +1706,145 @@
     }
 
     let positionsRefreshMs = 60000;
-    let positionsRefreshTimer = null;
+    let positionsFullTimer = null;
+    let positionsDeltaTimer = null;
+    let positionsEtag = null;
+    let lastPositionsSync = '';
+
     function schedulePositionsRefresh() {
-      if (positionsRefreshTimer) clearInterval(positionsRefreshTimer);
-      positionsRefreshTimer = setInterval(loadAllPositions, positionsRefreshMs);
+      if (positionsFullTimer) clearInterval(positionsFullTimer);
+      if (positionsDeltaTimer) clearInterval(positionsDeltaTimer);
+      positionsFullTimer = setInterval(loadAllPositions, positionsRefreshMs);
+      positionsDeltaTimer = setInterval(loadNewPositionsOnly, 10000);
     }
 
-    // Load all positions from server
-    function loadAllPositions() {
-      fetch('/api/positions')
-        .then((res) => res.json())
-        .then((users) => {
-          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
-          const meRow = valid.find((u) => u.id === userId);
-          const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
-          const nextMs = meManual ? 10000 : 60000;
-          if (nextMs !== positionsRefreshMs) {
-            positionsRefreshMs = nextMs;
-            schedulePositionsRefresh();
-          }
-          updateTopBarVisitors(valid.length);
-          const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
-          const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
-          sortPlayersByScoreAsc(valid);
+    function syncPositionsCursor(res) {
+      const maxUpd = res.headers.get('X-Positions-Max-Updated');
+      if (maxUpd && maxUpd > lastPositionsSync) lastPositionsSync = maxUpd;
+      const etag = res.headers.get('ETag');
+      if (etag) positionsEtag = etag;
+    }
 
-          valid.forEach((u) => {
-            const isMe = u.id === userId;
-            const key = u.id;
-            const skinId = (u.skin && String(u.skin).trim()) || 'red';
-            userSkinsCache.set(key, skinId);
-            const displayName = u.username || (isMe ? 'Me' : 'Guest');
-            const visits = typeof u.visits === 'number' ? u.visits : 1;
-            const popupHtml = getPopupHtml(displayName, visits, isMe);
-            const isTopScorer = topScorerIds.has(key);
-            playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
-            const isSelected = selectedPlayerId === key;
-            const z = getMarkerZIndexOffset(visits, isMe, isSelected);
-            if (isMe) {
-              myVisits = visits;
-              myLng = u.lng;
-              amTopScorer = isTopScorer;
-              if (u.anonymousLocation === true || u.anonymousLocation === 't') {
-                localStorage.setItem('anonymousLocation', 'true');
-              }
-              if (u.username && String(u.username).trim()) {
-                username = String(u.username).trim().slice(0, 40);
-                localStorage.setItem('username', username);
-              }
-              if (skinId) {
-                currentSkin = skinId;
-                localStorage.setItem('skin', skinId);
-              }
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId, isSelected);
-              if (userMarker) {
-                userMarker.setLatLng([u.lat, u.lng]);
-                userMarker.setPopupContent(popupHtml);
-                userMarker.setIcon(meIcon);
-                userMarker.setZIndexOffset(z);
-                syncMarkerPopup(userMarker, key);
-              } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
-                  .addTo(map);
-                bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
-                map.setView([u.lat, u.lng], 6);
-              }
-              bindMarkerSelection(userMarker, key);
-            } else {
-              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
-              if (otherMarkers.has(key)) {
-                const marker = otherMarkers.get(key);
-                marker.setLatLng([u.lat, u.lng]);
-                marker.setPopupContent(popupHtml);
-                marker.setIcon(icon);
-                marker.setZIndexOffset(z);
-                syncMarkerPopup(marker, key);
-              } else {
-                const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: z })
-                  .addTo(map);
-                bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
-                otherMarkers.set(key, m);
-                bindMarkerSelection(m, key);
-              }
-            }
-          });
-          if (typeof renderSkinList === 'function') renderSkinList();
+    function fetchPositions(opts) {
+      const headers = {};
+      if (opts.full && positionsEtag) headers['If-None-Match'] = positionsEtag;
+      let url = '/api/positions';
+      if (opts.since) url += '?since=' + encodeURIComponent(opts.since);
+      return fetch(url, { headers }).then((res) => {
+        if (res.status === 304) return { res, users: null, unchanged: true };
+        if (!res.ok) throw new Error('positions fetch failed');
+        syncPositionsCursor(res);
+        return res.json().then((users) => ({ res, users, unchanged: false }));
+      });
+    }
+
+    function recomputeTopScorersFromCache() {
+      let maxVisits = 0;
+      playerMarkerMeta.forEach((m) => {
+        if (m.visits > maxVisits) maxVisits = m.visits;
+      });
+      const topScorerIds = new Set();
+      playerMarkerMeta.forEach((m, id) => {
+        if (m.visits === maxVisits) topScorerIds.add(id);
+      });
+      playerMarkerMeta.forEach((m, id) => {
+        const isTopScorer = topScorerIds.has(id);
+        if (m.isTopScorer === isTopScorer) return;
+        m.isTopScorer = isTopScorer;
+        if (m.isMe) amTopScorer = isTopScorer;
+        refreshMarkerIcon(id);
+      });
+    }
+
+    function applySinglePositionUser(u, topScorerIds) {
+      const isMe = u.id === userId;
+      const key = u.id;
+      const skinId = (u.skin && String(u.skin).trim()) || 'red';
+      userSkinsCache.set(key, skinId);
+      const displayName = u.username || (isMe ? 'Me' : 'Guest');
+      const visits = typeof u.visits === 'number' ? u.visits : 1;
+      const popupHtml = getPopupHtml(displayName, visits, isMe);
+      const isTopScorer = topScorerIds.has(key);
+      playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
+      const isSelected = selectedPlayerId === key;
+      const z = getMarkerZIndexOffset(visits, isMe, isSelected);
+      if (isMe) {
+        myVisits = visits;
+        myLng = u.lng;
+        amTopScorer = isTopScorer;
+        if (u.anonymousLocation === true || u.anonymousLocation === 't') {
+          localStorage.setItem('anonymousLocation', 'true');
+        }
+        if (u.username && String(u.username).trim()) {
+          username = String(u.username).trim().slice(0, 40);
+          localStorage.setItem('username', username);
+        }
+        if (skinId) {
+          currentSkin = skinId;
+          localStorage.setItem('skin', skinId);
+        }
+        const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId, isSelected);
+        if (userMarker) {
+          userMarker.setLatLng([u.lat, u.lng]);
+          userMarker.setPopupContent(popupHtml);
+          userMarker.setIcon(meIcon);
+          userMarker.setZIndexOffset(z);
+          syncMarkerPopup(userMarker, key);
+        } else {
+          userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
+            .addTo(map);
+          bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
+          map.setView([u.lat, u.lng], 6);
+        }
+        bindMarkerSelection(userMarker, key);
+      } else {
+        const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
+        if (otherMarkers.has(key)) {
+          const marker = otherMarkers.get(key);
+          marker.setLatLng([u.lat, u.lng]);
+          marker.setPopupContent(popupHtml);
+          marker.setIcon(icon);
+          marker.setZIndexOffset(z);
+          syncMarkerPopup(marker, key);
+        } else {
+          const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: z })
+            .addTo(map);
+          bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
+          otherMarkers.set(key, m);
+          bindMarkerSelection(m, key);
+        }
+      }
+    }
+
+    function applyPositionUsers(users, isFullSync) {
+      const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
+      if (!valid.length) return;
+      if (isFullSync) {
+        const meRow = valid.find((u) => u.id === userId);
+        const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
+        const nextMs = meManual ? 10000 : 60000;
+        if (nextMs !== positionsRefreshMs) {
+          positionsRefreshMs = nextMs;
+          schedulePositionsRefresh();
+        }
+        updateTopBarVisitors(valid.length);
+        const maxVisits = Math.max(...valid.map((u) => (typeof u.visits === 'number' ? u.visits : 0)));
+        const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+        sortPlayersByScoreAsc(valid);
+        valid.forEach((u) => applySinglePositionUser(u, topScorerIds));
+        if (typeof renderSkinList === 'function') renderSkinList();
+      } else {
+        const pendingTop = new Set();
+        valid.forEach((u) => applySinglePositionUser(u, pendingTop));
+        recomputeTopScorersFromCache();
+      }
+    }
+
+    function loadAllPositions() {
+      fetchPositions({ full: true })
+        .then((payload) => {
+          if (payload.unchanged) return;
+          applyPositionUsers(payload.users, true);
         })
         .catch((err) => {
           console.error('Error while loading positions:', err);
@@ -1799,71 +1854,12 @@
       loadTopScores();
     }
 
-    // Refresh only new points (does not affect existing markers)
     function loadNewPositionsOnly() {
-      fetch('/api/positions')
-        .then((res) => res.json())
-        .then((users) => {
-          const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
-          updateTopBarVisitors(valid.length);
-          const maxVisits = valid.length ? Math.max(...valid.map((u) => typeof u.visits === 'number' ? u.visits : 0)) : 0;
-          const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
-          sortPlayersByScoreAsc(valid);
-
-          valid.forEach((u) => {
-            const isMe = u.id === userId;
-            const key = u.id;
-            const skinId = (u.skin && String(u.skin).trim()) || 'red';
-            userSkinsCache.set(key, skinId);
-            const displayName = u.username || (isMe ? 'Me' : 'Guest');
-            const visits = typeof u.visits === 'number' ? u.visits : 1;
-            const popupHtml = getPopupHtml(displayName, visits, isMe);
-            const isTopScorer = topScorerIds.has(key);
-            playerMarkerMeta.set(key, { visits, lng: u.lng, isTopScorer, skinId, isMe });
-            const isSelected = selectedPlayerId === key;
-            const z = getMarkerZIndexOffset(visits, isMe, isSelected);
-            if (isMe) {
-              myVisits = visits;
-              myLng = u.lng;
-              amTopScorer = isTopScorer;
-              if (u.anonymousLocation === true || u.anonymousLocation === 't') {
-                localStorage.setItem('anonymousLocation', 'true');
-              }
-              if (u.username && String(u.username).trim()) {
-                username = String(u.username).trim().slice(0, 40);
-                localStorage.setItem('username', username);
-              }
-              if (skinId) {
-                currentSkin = skinId;
-                localStorage.setItem('skin', skinId);
-              }
-              const meIcon = createMeIcon(visits, u.lng, isTopScorer, skinId, isSelected);
-              if (userMarker) {
-                userMarker.setLatLng([u.lat, u.lng]);
-                userMarker.setPopupContent(popupHtml);
-                userMarker.setIcon(meIcon);
-                userMarker.setZIndexOffset(z);
-                syncMarkerPopup(userMarker, key);
-              } else {
-                userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
-                  .addTo(map);
-                bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
-                map.setView([u.lat, u.lng], 6);
-              }
-              bindMarkerSelection(userMarker, key);
-            } else {
-              if (otherMarkers.has(key)) {
-                if (selectedPlayerId === key) refreshMarkerIcon(key);
-                return;
-              }
-              const icon = createOtherIcon(visits, u.lng, isTopScorer, skinId, isSelected);
-              const m = L.marker([u.lat, u.lng], { title: displayName, icon, zIndexOffset: z })
-                .addTo(map);
-              bindPlayerPopup(m, popupHtml, visits, isTopScorer, key);
-              otherMarkers.set(key, m);
-              bindMarkerSelection(m, key);
-            }
-          });
+      if (!lastPositionsSync) return;
+      fetchPositions({ since: lastPositionsSync })
+        .then((payload) => {
+          if (payload.unchanged || !payload.users || !payload.users.length) return;
+          applyPositionUsers(payload.users, false);
         })
         .catch((err) => {
           console.error('Error while loading new positions:', err);

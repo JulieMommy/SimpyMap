@@ -1,4 +1,5 @@
 require('dotenv').config();
+const compression = require('compression');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -7,7 +8,9 @@ const { pool, initSchema } = require('./db.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
+app.use(compression({ threshold: 256 }));
 app.use(express.json());
 
 const DRONE_EXTERNAL_BASE = 'https://juliemommy.pythonanywhere.com';
@@ -35,7 +38,19 @@ app.post('/api/unlock-drone', async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(
+  express.static(PUBLIC_DIR, {
+    etag: true,
+    lastModified: true,
+    setHeaders(res, filePath) {
+      if (/\.html?$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'no-cache');
+      } else if (/\.(png|jpe?g|gif|webp|ico|svg)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      }
+    }
+  })
+);
 
 const PREFERRED_IMAGE_SKINS = [
   { id: 'Drone', name: 'Drone' },
@@ -726,10 +741,53 @@ app.get('/api/last-joined', async (req, res) => {
   }
 });
 
+const POSITION_COLUMNS =
+  'id, lat, lng, username, visits, skin, "anonymousLocation", "manualOverride", "updatedAt"';
+const POSITIONS_WHERE = 'lat IS NOT NULL AND lng IS NOT NULL';
+
+function mapPositionRow(row) {
+  const out = {
+    id: row.id,
+    lat: row.lat,
+    lng: row.lng,
+    username: row.username,
+    visits: typeof row.visits === 'number' ? row.visits : Number(row.visits) || 1,
+    skin: row.skin
+  };
+  if (row.anonymousLocation === true || row.anonymousLocation === 't') out.anonymousLocation = true;
+  if (row.manualOverride === true || row.manualOverride === 't') out.manualOverride = true;
+  return out;
+}
+
 app.get('/api/positions', async (req, res) => {
+  const since = (req.query.since || '').toString().trim();
   try {
-    const { rows } = await pool.query('SELECT * FROM users');
-    res.json(rows);
+    const { rows: metaRows } = await pool.query(
+      `SELECT COUNT(*)::int AS c, COALESCE(MAX("updatedAt"), '') AS mu FROM users WHERE ${POSITIONS_WHERE}`
+    );
+    const meta = metaRows[0];
+    const etag = `"pos-${meta.c}-${meta.mu}"`;
+    res.setHeader('X-Positions-Max-Updated', meta.mu || '');
+
+    if (!since) {
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+      const { rows } = await pool.query(
+        `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE}`
+      );
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'private, no-cache');
+      return res.json(rows.map(mapPositionRow));
+    }
+
+    const { rows } = await pool.query(
+      `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE} AND "updatedAt" > $1 ORDER BY "updatedAt" ASC`,
+      [since]
+    );
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.json(rows.map(mapPositionRow));
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
