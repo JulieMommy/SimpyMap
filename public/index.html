@@ -1705,17 +1705,27 @@
       return div.innerHTML;
     }
 
+    const POSITIONS_DELTA_MS = 60000;   // 1 min
+    const PANELS_REFRESH_MS = 150000;   // 2 min 30
     let positionsRefreshMs = 60000;
     let positionsFullTimer = null;
     let positionsDeltaTimer = null;
+    let panelsTimer = null;
     let positionsEtag = null;
     let lastPositionsSync = '';
+
+    function loadPanels() {
+      loadLastJoined();
+      loadTopScores();
+    }
 
     function schedulePositionsRefresh() {
       if (positionsFullTimer) clearInterval(positionsFullTimer);
       if (positionsDeltaTimer) clearInterval(positionsDeltaTimer);
+      if (panelsTimer) clearInterval(panelsTimer);
       positionsFullTimer = setInterval(loadAllPositions, positionsRefreshMs);
-      positionsDeltaTimer = setInterval(loadNewPositionsOnly, 10000);
+      positionsDeltaTimer = setInterval(loadNewPositionsOnly, POSITIONS_DELTA_MS);
+      panelsTimer = setInterval(loadPanels, PANELS_REFRESH_MS);
     }
 
     function syncPositionsCursor(res) {
@@ -1850,8 +1860,6 @@
           console.error('Error while loading positions:', err);
         });
       loadLeaderboard();
-      loadLastJoined();
-      loadTopScores();
     }
 
     function loadNewPositionsOnly() {
@@ -1864,8 +1872,6 @@
         .catch((err) => {
           console.error('Error while loading new positions:', err);
         });
-      loadLastJoined();
-      loadTopScores();
     }
 
     function loadLeaderboard() {
@@ -2184,6 +2190,7 @@
     setupSkinPanel();
 
     schedulePositionsRefresh();
+    loadPanels();
   </script>
 </body>
 </html>
