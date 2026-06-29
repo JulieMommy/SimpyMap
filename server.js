@@ -10,8 +10,76 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-app.use(compression({ threshold: 256 }));
+app.use(
+  compression({
+    threshold: 256,
+    filter(req, res) {
+      if (req.path === '/api/events') return false;
+      return compression.filter(req, res);
+    }
+  })
+);
 app.use(express.json());
+
+// --- SSE: server pushes when map data changes (clients fetch only then) ---
+const sseClients = new Set();
+let broadcastPending = { p: false, l: false, b: false };
+let broadcastTimer = null;
+
+function flushBroadcast() {
+  const payload = {
+    p: broadcastPending.p ? 1 : 0,
+    l: broadcastPending.l ? 1 : 0,
+    b: broadcastPending.b ? 1 : 0
+  };
+  broadcastPending = { p: false, l: false, b: false };
+  if (!payload.p && !payload.l && !payload.b) return;
+  const line = `event: update\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+/** @param {('positions'|'leaderboard'|'panels'|'all')[]} types */
+function notifyMapUpdate(types) {
+  if (types.includes('all')) {
+    broadcastPending = { p: true, l: true, b: true };
+  } else {
+    if (types.includes('positions')) {
+      broadcastPending.p = true;
+      broadcastPending.b = true;
+    }
+    if (types.includes('leaderboard')) broadcastPending.l = true;
+    if (types.includes('panels')) broadcastPending.b = true;
+  }
+  clearTimeout(broadcastTimer);
+  broadcastTimer = setTimeout(flushBroadcast, 200);
+}
+
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  res.write(': connected\n\n');
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
+setInterval(() => {
+  if (!sseClients.size) return;
+  for (const res of sseClients) {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}, 45000);
 
 const DRONE_EXTERNAL_BASE = 'https://juliemommy.pythonanywhere.com';
 const EXTERNAL_UNLOCK_SKIN_ID = 'Drone';
@@ -31,6 +99,7 @@ app.post('/api/unlock-drone', async (req, res) => {
        ON CONFLICT ("userId", "skinId") DO NOTHING`,
       [userId, EXTERNAL_UNLOCK_SKIN_ID]
     );
+    notifyMapUpdate(['panels']);
     res.json({ ok: true });
   } catch (err) {
     console.error('DB error:', err);
@@ -403,6 +472,7 @@ async function fillUnknownCountries() {
          AND COALESCE("anonymousLocation", false) = false`
     );
     if (!rows.length) return;
+    let anyUpdated = false;
     for (const u of rows) {
       const country = await fetchPlace(u.lat, u.lng).then((p) => p.country);
       if (country && country !== 'Unknown') {
@@ -411,9 +481,11 @@ async function fillUnknownCountries() {
           new Date().toISOString(),
           u.id
         ]);
+        anyUpdated = true;
       }
       await new Promise((r) => setTimeout(r, 1100));
     }
+    if (anyUpdated) notifyMapUpdate(['leaderboard']);
   } catch (err) {
     console.warn('fillUnknownCountries:', err.message);
   }
@@ -600,6 +672,7 @@ app.post('/api/position', async (req, res) => {
       today
     );
 
+    notifyMapUpdate(['positions', 'leaderboard']);
     res.json({
       ok: true,
       pointEarned: canEarn || !row,
@@ -655,6 +728,7 @@ app.post('/api/set-skin', async (req, res) => {
 
     if (!cleanSkin) {
       await pool.query('UPDATE users SET skin = NULL, "updatedAt" = $1 WHERE id = $2', [now, userId]);
+      notifyMapUpdate(['positions']);
       return res.json({ ok: true });
     }
 
@@ -671,6 +745,7 @@ app.post('/api/set-skin', async (req, res) => {
     }
 
     await pool.query('UPDATE users SET skin = $1, "updatedAt" = $2 WHERE id = $3', [cleanSkin, now, userId]);
+    notifyMapUpdate(['positions']);
     res.json({ ok: true });
   } catch (err) {
     console.error('DB error:', err);

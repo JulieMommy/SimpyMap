@@ -1705,27 +1705,69 @@
       return div.innerHTML;
     }
 
-    const POSITIONS_DELTA_MS = 60000;   // 1 min
-    const PANELS_REFRESH_MS = 150000;   // 2 min 30
-    let positionsRefreshMs = 60000;
-    let positionsFullTimer = null;
-    let positionsDeltaTimer = null;
-    let panelsTimer = null;
+    const FALLBACK_SYNC_MS = 5 * 60 * 1000; // safety full check every 5 min (often 304)
     let positionsEtag = null;
     let lastPositionsSync = '';
+    let fallbackTimer = null;
+    let sseDebounceTimer = null;
+    let pendingSse = { p: false, l: false, b: false };
+    let mapEventSource = null;
 
     function loadPanels() {
       loadLastJoined();
       loadTopScores();
     }
 
-    function schedulePositionsRefresh() {
-      if (positionsFullTimer) clearInterval(positionsFullTimer);
-      if (positionsDeltaTimer) clearInterval(positionsDeltaTimer);
-      if (panelsTimer) clearInterval(panelsTimer);
-      positionsFullTimer = setInterval(loadAllPositions, positionsRefreshMs);
-      positionsDeltaTimer = setInterval(loadNewPositionsOnly, POSITIONS_DELTA_MS);
-      panelsTimer = setInterval(loadPanels, PANELS_REFRESH_MS);
+    function applySseUpdates() {
+      const flags = { ...pendingSse };
+      pendingSse = { p: false, l: false, b: false };
+      if (flags.p) {
+        if (lastPositionsSync) loadNewPositionsOnly();
+        else loadAllPositions();
+      }
+      if (flags.l) loadLeaderboard();
+      if (flags.b) loadPanels();
+    }
+
+    function queueSseUpdate(data) {
+      try {
+        const flags = typeof data === 'string' ? JSON.parse(data) : data;
+        if (flags.p) pendingSse.p = true;
+        if (flags.l) pendingSse.l = true;
+        if (flags.b) pendingSse.b = true;
+      } catch (e) {
+        pendingSse.p = true;
+        pendingSse.l = true;
+        pendingSse.b = true;
+      }
+      clearTimeout(sseDebounceTimer);
+      sseDebounceTimer = setTimeout(applySseUpdates, 150);
+    }
+
+    function connectMapEvents() {
+      if (mapEventSource) {
+        mapEventSource.close();
+        mapEventSource = null;
+      }
+      mapEventSource = new EventSource('/api/events');
+      mapEventSource.addEventListener('update', (e) => queueSseUpdate(e.data));
+      mapEventSource.onopen = () => {
+        if (lastPositionsSync) loadNewPositionsOnly();
+      };
+      mapEventSource.onerror = () => {
+        // EventSource auto-reconnects; onopen will delta-sync
+      };
+    }
+
+    function scheduleFallbackSync() {
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      fallbackTimer = setInterval(() => {
+        fetchPositions({ full: true })
+          .then((payload) => {
+            if (!payload.unchanged && payload.users) applyPositionUsers(payload.users, true);
+          })
+          .catch(() => {});
+      }, FALLBACK_SYNC_MS);
     }
 
     function syncPositionsCursor(res) {
@@ -1830,13 +1872,6 @@
       const valid = (users || []).filter((u) => typeof u.lat === 'number' && typeof u.lng === 'number');
       if (!valid.length) return;
       if (isFullSync) {
-        const meRow = valid.find((u) => u.id === userId);
-        const meManual = meRow && (meRow.manualOverride === true || meRow.manualOverride === 't');
-        const nextMs = meManual ? 10000 : 60000;
-        if (nextMs !== positionsRefreshMs) {
-          positionsRefreshMs = nextMs;
-          schedulePositionsRefresh();
-        }
         updateTopBarVisitors(valid.length);
         const maxVisits = Math.max(...valid.map((u) => (typeof u.visits === 'number' ? u.visits : 0)));
         const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
@@ -2189,8 +2224,10 @@
     }
     setupSkinPanel();
 
-    schedulePositionsRefresh();
+    loadAllPositions();
     loadPanels();
+    connectMapEvents();
+    scheduleFallbackSync();
   </script>
 </body>
 </html>
