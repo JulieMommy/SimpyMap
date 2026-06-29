@@ -1619,24 +1619,26 @@
       return `${min} minutes ago`;
     }
 
+    function renderLastJoined(data) {
+      const list = document.getElementById('last-joined-list');
+      if (!list) return;
+      const users = (data.users || []).slice(0, 3);
+      if (users.length === 0) {
+        list.innerHTML = '<li class="last-joined-item">No one yet</li>';
+        return;
+      }
+      list.innerHTML = users
+        .map(
+          (u) =>
+            `<li class="last-joined-item"><span class="name">${escapeHtml(u.username || 'Guest')}</span><br><span class="city">${escapeHtml(u.city || '—')}</span> · <span class="time">${minutesAgo(u.updatedAt)}</span></li>`
+        )
+        .join('');
+    }
+
     function loadLastJoined() {
       fetch('/api/last-joined')
         .then((res) => res.json())
-        .then((data) => {
-          const list = document.getElementById('last-joined-list');
-          if (!list) return;
-          const users = (data.users || []).slice(0, 3);
-          if (users.length === 0) {
-            list.innerHTML = '<li class="last-joined-item">No one yet</li>';
-            return;
-          }
-          list.innerHTML = users
-            .map(
-              (u) =>
-                `<li class="last-joined-item"><span class="name">${escapeHtml(u.username || 'Guest')}</span><br><span class="city">${escapeHtml(u.city || '—')}</span> · <span class="time">${minutesAgo(u.updatedAt)}</span></li>`
-            )
-            .join('');
-        })
+        .then((data) => renderLastJoined(data))
         .catch(() => {
           const list = document.getElementById('last-joined-list');
           if (list) list.innerHTML = '<li class="last-joined-item">—</li>';
@@ -1652,47 +1654,49 @@
       return n + 'th';
     }
 
+    function renderTopScores(data) {
+      const list = document.getElementById('top-scores-list');
+      if (!list) return;
+      const users = (data.users || []).slice(0, 10);
+      const you = data.you || null;
+      if (users.length === 0 && !you) {
+        list.innerHTML = '<li class="top-scores-item">No scores yet</li>';
+        return;
+      }
+      let html = users
+        .map((u, i) => {
+          const name = escapeHtml(u.username || 'Guest');
+          const isMe = String(u.id) === String(userId);
+          const skinFromApi = (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : null;
+          const skin = skinFromApi || (isMe ? currentSkin : (userSkinsCache.get(u.id) || 'red'));
+          const skinStyle = getSkinStyle(skin);
+          const dotHtml = skinStyle.style
+            ? `<div class="point-dot" style="${skinStyle.style}"></div>`
+            : skinStyle.extraClass
+              ? `<div class="point-dot ${skinStyle.extraClass}"></div>`
+              : `<div class="point-dot" style="background:${getSkinColor(skin)} !important"></div>`;
+          const meClass = isMe ? ' is-me' : '';
+          return `<li class="top-scores-item${meClass}">${dotHtml}<span class="name">${name}</span><span class="score">${u.score}</span></li>`;
+        })
+        .join('');
+      if (you) {
+        const rankStr = rankSuffix(you.rank);
+        const youSkin = (you.skin != null && String(you.skin).trim()) ? String(you.skin).trim() : currentSkin;
+        const youSkinStyle = getSkinStyle(youSkin || 'red');
+        const youPointHtml = youSkinStyle.style
+          ? `<div class="point-dot" style="${youSkinStyle.style}"></div>`
+          : youSkinStyle.extraClass
+            ? `<div class="point-dot ${youSkinStyle.extraClass}"></div>`
+            : `<div class="point-dot" style="background:${getSkinColor(youSkin)} !important"></div>`;
+        html += `<li class="top-scores-item is-me you-row">${youPointHtml}<span class="name">${escapeHtml(you.username)}</span><span class="rank-label">${rankStr}</span><span class="score">${you.score}</span></li>`;
+      }
+      list.innerHTML = html;
+    }
+
     function loadTopScores() {
       fetch(`/api/top-scores?userId=${encodeURIComponent(userId)}`)
         .then((res) => res.json())
-        .then((data) => {
-          const list = document.getElementById('top-scores-list');
-          if (!list) return;
-          const users = (data.users || []).slice(0, 10);
-          const you = data.you || null;
-          if (users.length === 0 && !you) {
-            list.innerHTML = '<li class="top-scores-item">No scores yet</li>';
-            return;
-          }
-          let html = users
-            .map((u, i) => {
-              const name = escapeHtml(u.username || 'Guest');
-              const isMe = String(u.id) === String(userId);
-              const skinFromApi = (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : null;
-              const skin = skinFromApi || (isMe ? currentSkin : (userSkinsCache.get(u.id) || 'red'));
-              const skinStyle = getSkinStyle(skin);
-              const dotHtml = skinStyle.style
-                ? `<div class="point-dot" style="${skinStyle.style}"></div>`
-                : skinStyle.extraClass
-                  ? `<div class="point-dot ${skinStyle.extraClass}"></div>`
-                  : `<div class="point-dot" style="background:${getSkinColor(skin)} !important"></div>`;
-              const meClass = isMe ? ' is-me' : '';
-              return `<li class="top-scores-item${meClass}">${dotHtml}<span class="name">${name}</span><span class="score">${u.score}</span></li>`;
-            })
-            .join('');
-          if (you) {
-            const rankStr = rankSuffix(you.rank);
-            const youSkin = (you.skin != null && String(you.skin).trim()) ? String(you.skin).trim() : currentSkin;
-            const youSkinStyle = getSkinStyle(youSkin || 'red');
-            const youPointHtml = youSkinStyle.style
-              ? `<div class="point-dot" style="${youSkinStyle.style}"></div>`
-              : youSkinStyle.extraClass
-                ? `<div class="point-dot ${youSkinStyle.extraClass}"></div>`
-                : `<div class="point-dot" style="background:${getSkinColor(youSkin)} !important"></div>`;
-            html += `<li class="top-scores-item is-me you-row">${youPointHtml}<span class="name">${escapeHtml(you.username)}</span><span class="rank-label">${rankStr}</span><span class="score">${you.score}</span></li>`;
-          }
-          list.innerHTML = html;
-        })
+        .then((data) => renderTopScores(data))
         .catch(() => {
           const list = document.getElementById('top-scores-list');
           if (list) list.innerHTML = '<li class="top-scores-item">—</li>';
@@ -1706,27 +1710,104 @@
     }
 
     const FALLBACK_SYNC_MS = 5 * 60 * 1000; // safety full check every 5 min (often 304)
-    let positionsEtag = null;
+    let dashboardEtag = null;
     let lastPositionsSync = '';
     let fallbackTimer = null;
     let sseDebounceTimer = null;
     let pendingSse = { p: false, l: false, b: false };
     let mapEventSource = null;
 
+    function renderLeaderboard(data) {
+      const list = document.getElementById('leaderboard-list');
+      if (!list) return;
+      const rows = data.rows || [];
+      const you = data.you || null;
+      if (rows.length === 0 && !you) {
+        list.innerHTML = '<li class="leaderboard-item">No data yet</li>';
+        return;
+      }
+      const youInTop10 = you && rows.some((r) => r.country === you.country);
+      let html = rows
+        .map((r, i) => {
+          const isYou = you && r.country === you.country;
+          const cls = isYou ? 'leaderboard-item is-you' : 'leaderboard-item';
+          return `<li class="${cls}"><span class="rank">${i + 1}.</span><span>${r.country}</span><span class="count">${r.count}</span></li>`;
+        })
+        .join('');
+      if (you && !youInTop10 && you.country) {
+        html += `<li class="leaderboard-item is-you you-row"><span class="rank">You</span><span>${you.country}</span><span class="count">${you.count}</span></li>`;
+      }
+      list.innerHTML = html;
+    }
+
+    function applyDashboardData(data, opts) {
+      const isFullSync = opts && opts.fullSync;
+      if (data.positions) {
+        if (isFullSync || !lastPositionsSync) {
+          applyPositionUsers(data.positions, true);
+        } else if (data.positions.length) {
+          applyPositionUsers(data.positions, false);
+        }
+      }
+      if (data.leaderboard) renderLeaderboard(data.leaderboard);
+      if (data.lastJoined) renderLastJoined(data.lastJoined);
+      if (data.topScores) renderTopScores(data.topScores);
+    }
+
+    function fetchDashboard(opts) {
+      const headers = {};
+      if (opts.full && dashboardEtag) headers['If-None-Match'] = dashboardEtag;
+      const params = new URLSearchParams({ userId });
+      if (opts.since) params.set('since', opts.since);
+      if (opts.only) params.set('only', opts.only);
+      return fetch(`/api/dashboard?${params}`, { headers }).then((res) => {
+        if (res.status === 304) return { res, data: null, unchanged: true };
+        if (!res.ok) throw new Error('dashboard fetch failed');
+        const maxUpd = res.headers.get('X-Positions-Max-Updated');
+        if (maxUpd && maxUpd > lastPositionsSync) lastPositionsSync = maxUpd;
+        const etag = res.headers.get('ETag');
+        if (etag) dashboardEtag = etag;
+        return res.json().then((data) => ({ res, data, unchanged: false }));
+      });
+    }
+
     function loadPanels() {
-      loadLastJoined();
-      loadTopScores();
+      return fetchDashboard({ only: 'panels' })
+        .then((payload) => {
+          if (!payload.unchanged && payload.data) applyDashboardData(payload.data, {});
+        })
+        .catch(() => {
+          loadLastJoined();
+          loadTopScores();
+        });
+    }
+
+    function sseOnlyParam(flags) {
+      const parts = [];
+      if (flags.p) parts.push('positions');
+      if (flags.l) parts.push('leaderboard');
+      if (flags.b) parts.push('panels');
+      return parts.join(',');
     }
 
     function applySseUpdates() {
       const flags = { ...pendingSse };
       pendingSse = { p: false, l: false, b: false };
-      if (flags.p) {
-        if (lastPositionsSync) loadNewPositionsOnly();
-        else loadAllPositions();
-      }
-      if (flags.l) loadLeaderboard();
-      if (flags.b) loadPanels();
+      const only = sseOnlyParam(flags);
+      if (!only) return;
+
+      const useDelta = flags.p && lastPositionsSync;
+      fetchDashboard({
+        since: useDelta ? lastPositionsSync : undefined,
+        only
+      })
+        .then((payload) => {
+          if (payload.unchanged || !payload.data) return;
+          applyDashboardData(payload.data, {
+            fullSync: flags.p && !useDelta
+          });
+        })
+        .catch((err) => console.error('SSE dashboard sync:', err));
     }
 
     function queueSseUpdate(data) {
@@ -1752,7 +1833,13 @@
       mapEventSource = new EventSource('/api/events');
       mapEventSource.addEventListener('update', (e) => queueSseUpdate(e.data));
       mapEventSource.onopen = () => {
-        if (lastPositionsSync) loadNewPositionsOnly();
+        if (lastPositionsSync) {
+          fetchDashboard({ since: lastPositionsSync, only: 'positions' })
+            .then((payload) => {
+              if (!payload.unchanged && payload.data) applyDashboardData(payload.data, {});
+            })
+            .catch(() => {});
+        }
       };
       mapEventSource.onerror = () => {
         // EventSource auto-reconnects; onopen will delta-sync
@@ -1762,32 +1849,12 @@
     function scheduleFallbackSync() {
       if (fallbackTimer) clearInterval(fallbackTimer);
       fallbackTimer = setInterval(() => {
-        fetchPositions({ full: true })
+        fetchDashboard({ full: true })
           .then((payload) => {
-            if (!payload.unchanged && payload.users) applyPositionUsers(payload.users, true);
+            if (!payload.unchanged && payload.data) applyDashboardData(payload.data, { fullSync: true });
           })
           .catch(() => {});
       }, FALLBACK_SYNC_MS);
-    }
-
-    function syncPositionsCursor(res) {
-      const maxUpd = res.headers.get('X-Positions-Max-Updated');
-      if (maxUpd && maxUpd > lastPositionsSync) lastPositionsSync = maxUpd;
-      const etag = res.headers.get('ETag');
-      if (etag) positionsEtag = etag;
-    }
-
-    function fetchPositions(opts) {
-      const headers = {};
-      if (opts.full && positionsEtag) headers['If-None-Match'] = positionsEtag;
-      let url = '/api/positions';
-      if (opts.since) url += '?since=' + encodeURIComponent(opts.since);
-      return fetch(url, { headers }).then((res) => {
-        if (res.status === 304) return { res, users: null, unchanged: true };
-        if (!res.ok) throw new Error('positions fetch failed');
-        syncPositionsCursor(res);
-        return res.json().then((users) => ({ res, users, unchanged: false }));
-      });
     }
 
     function recomputeTopScorersFromCache() {
@@ -1886,23 +1953,22 @@
     }
 
     function loadAllPositions() {
-      fetchPositions({ full: true })
+      fetchDashboard({ full: true })
         .then((payload) => {
-          if (payload.unchanged) return;
-          applyPositionUsers(payload.users, true);
+          if (payload.unchanged || !payload.data) return;
+          applyDashboardData(payload.data, { fullSync: true });
         })
         .catch((err) => {
-          console.error('Error while loading positions:', err);
+          console.error('Error while loading dashboard:', err);
         });
-      loadLeaderboard();
     }
 
     function loadNewPositionsOnly() {
       if (!lastPositionsSync) return;
-      fetchPositions({ since: lastPositionsSync })
+      fetchDashboard({ since: lastPositionsSync, only: 'positions' })
         .then((payload) => {
-          if (payload.unchanged || !payload.users || !payload.users.length) return;
-          applyPositionUsers(payload.users, false);
+          if (payload.unchanged || !payload.data || !payload.data.positions || !payload.data.positions.length) return;
+          applyDashboardData(payload.data, {});
         })
         .catch((err) => {
           console.error('Error while loading new positions:', err);
@@ -1910,29 +1976,11 @@
     }
 
     function loadLeaderboard() {
-      fetch(`/api/leaderboard?userId=${encodeURIComponent(userId)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          const list = document.getElementById('leaderboard-list');
-          if (!list) return;
-          const rows = data.rows || [];
-          const you = data.you || null;
-          if (rows.length === 0 && !you) {
-            list.innerHTML = '<li class="leaderboard-item">No data yet</li>';
-            return;
+      fetchDashboard({ only: 'leaderboard' })
+        .then((payload) => {
+          if (!payload.unchanged && payload.data && payload.data.leaderboard) {
+            renderLeaderboard(payload.data.leaderboard);
           }
-          const youInTop10 = you && rows.some((r) => r.country === you.country);
-          let html = rows
-            .map((r, i) => {
-              const isYou = you && r.country === you.country;
-              const cls = isYou ? 'leaderboard-item is-you' : 'leaderboard-item';
-              return `<li class="${cls}"><span class="rank">${i + 1}.</span><span>${r.country}</span><span class="count">${r.count}</span></li>`;
-            })
-            .join('');
-          if (you && !youInTop10 && you.country) {
-            html += `<li class="leaderboard-item is-you you-row"><span class="rank">You</span><span>${you.country}</span><span class="count">${you.count}</span></li>`;
-          }
-          list.innerHTML = html;
         })
         .catch(() => {
           const list = document.getElementById('leaderboard-list');
@@ -2225,7 +2273,6 @@
     setupSkinPanel();
 
     loadAllPositions();
-    loadPanels();
     connectMapEvents();
     scheduleFallbackSync();
   </script>

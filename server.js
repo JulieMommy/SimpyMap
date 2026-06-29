@@ -753,69 +753,6 @@ app.post('/api/set-skin', async (req, res) => {
   }
 });
 
-app.get('/api/top-scores', async (req, res) => {
-  const userId = (req.query.userId || '').toString().trim();
-  try {
-    const { rows } = await pool.query(
-      'SELECT id, username, visits, skin FROM users ORDER BY visits DESC LIMIT 10'
-    );
-    const users = rows.map((r) => ({
-      id: r.id,
-      username: r.username || 'Guest',
-      score: typeof r.visits === 'number' ? r.visits : 0,
-      skin: (r.skin != null && String(r.skin).trim()) ? String(r.skin).trim() : 'red'
-    }));
-    if (!userId) return res.json({ users, you: null });
-
-    const { rows: meRows } = await pool.query(
-      'SELECT username, visits, skin FROM users WHERE id = $1',
-      [userId]
-    );
-    const u = meRows[0];
-    if (!u) return res.json({ users, you: null });
-
-    const myScore = typeof u.visits === 'number' ? u.visits : 0;
-    const { rows: rankRows } = await pool.query(
-      'SELECT COUNT(*)::int AS n FROM users WHERE visits > $1',
-      [myScore]
-    );
-    const rank = (rankRows[0] && rankRows[0].n) + 1;
-    const inTop10 = users.some((x) => x.id === userId);
-    if (inTop10) return res.json({ users, you: null });
-
-    res.json({
-      users,
-      you: {
-        rank,
-        score: myScore,
-        username: u.username || 'Guest',
-        skin: (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : 'red'
-      }
-    });
-  } catch (err) {
-    console.error('DB error:', err);
-    res.status(500).json({ users: [], you: null });
-  }
-});
-
-app.get('/api/last-joined', async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT username, city, "updatedAt" FROM users ORDER BY "updatedAt" DESC NULLS LAST LIMIT 3'
-    );
-    res.json({
-      users: rows.map((r) => ({
-        username: r.username || 'Guest',
-        city: r.city || '',
-        updatedAt: r.updatedAt
-      }))
-    });
-  } catch (err) {
-    console.error('DB error:', err);
-    res.status(500).json({ users: [] });
-  }
-});
-
 const POSITION_COLUMNS =
   'id, lat, lng, username, visits, skin, "anonymousLocation", "manualOverride", "updatedAt"';
 const POSITIONS_WHERE = 'lat IS NOT NULL AND lng IS NOT NULL';
@@ -834,40 +771,78 @@ function mapPositionRow(row) {
   return out;
 }
 
-app.get('/api/positions', async (req, res) => {
-  const since = (req.query.since || '').toString().trim();
-  try {
-    const { rows: metaRows } = await pool.query(
-      `SELECT COUNT(*)::int AS c, COALESCE(MAX("updatedAt"), '') AS mu FROM users WHERE ${POSITIONS_WHERE}`
-    );
-    const meta = metaRows[0];
-    const etag = `"pos-${meta.c}-${meta.mu}"`;
-    res.setHeader('X-Positions-Max-Updated', meta.mu || '');
+async function queryPositionsMeta() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS c, COALESCE(MAX("updatedAt"), '') AS mu FROM users WHERE ${POSITIONS_WHERE}`
+  );
+  return rows[0];
+}
 
-    if (!since) {
-      if (req.headers['if-none-match'] === etag) {
-        return res.status(304).end();
-      }
-      const { rows } = await pool.query(
-        `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE}`
-      );
-      res.setHeader('ETag', etag);
-      res.setHeader('Cache-Control', 'private, no-cache');
-      return res.json(rows.map(mapPositionRow));
+async function queryPositionsFull() {
+  const { rows } = await pool.query(
+    `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE}`
+  );
+  return rows.map(mapPositionRow);
+}
+
+async function queryPositionsSince(since) {
+  const { rows } = await pool.query(
+    `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE} AND "updatedAt" > $1 ORDER BY "updatedAt" ASC`,
+    [since]
+  );
+  return rows.map(mapPositionRow);
+}
+
+async function queryTopScores(userId) {
+  const { rows } = await pool.query(
+    'SELECT id, username, visits, skin FROM users ORDER BY visits DESC LIMIT 10'
+  );
+  const users = rows.map((r) => ({
+    id: r.id,
+    username: r.username || 'Guest',
+    score: typeof r.visits === 'number' ? r.visits : 0,
+    skin: (r.skin != null && String(r.skin).trim()) ? String(r.skin).trim() : 'red'
+  }));
+  if (!userId) return { users, you: null };
+
+  const { rows: meRows } = await pool.query(
+    'SELECT username, visits, skin FROM users WHERE id = $1',
+    [userId]
+  );
+  const u = meRows[0];
+  if (!u) return { users, you: null };
+
+  const myScore = typeof u.visits === 'number' ? u.visits : 0;
+  const { rows: rankRows } = await pool.query(
+    'SELECT COUNT(*)::int AS n FROM users WHERE visits > $1',
+    [myScore]
+  );
+  const rank = (rankRows[0] && rankRows[0].n) + 1;
+  if (users.some((x) => x.id === userId)) return { users, you: null };
+
+  return {
+    users,
+    you: {
+      rank,
+      score: myScore,
+      username: u.username || 'Guest',
+      skin: (u.skin != null && String(u.skin).trim()) ? String(u.skin).trim() : 'red'
     }
+  };
+}
 
-    const { rows } = await pool.query(
-      `SELECT ${POSITION_COLUMNS} FROM users WHERE ${POSITIONS_WHERE} AND "updatedAt" > $1 ORDER BY "updatedAt" ASC`,
-      [since]
-    );
-    res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'private, no-cache');
-    res.json(rows.map(mapPositionRow));
-  } catch (err) {
-    console.error('DB error:', err);
-    res.status(500).json({ error: 'DB error' });
-  }
-});
+async function queryLastJoined() {
+  const { rows } = await pool.query(
+    'SELECT username, city, "updatedAt" FROM users ORDER BY "updatedAt" DESC NULLS LAST LIMIT 3'
+  );
+  return {
+    users: rows.map((r) => ({
+      username: r.username || 'Guest',
+      city: r.city || '',
+      updatedAt: r.updatedAt
+    }))
+  };
+}
 
 function countryToEnglish(name) {
   if (!name || name === 'Unknown') return name;
@@ -882,46 +857,142 @@ function countryToEnglish(name) {
   return name;
 }
 
+async function queryLeaderboard(userId) {
+  const { rows } = await pool.query(
+    `SELECT country, count FROM (
+       SELECT COALESCE(NULLIF(TRIM(country), ''), 'Unknown') AS country, COUNT(*)::int AS count
+       FROM users
+       GROUP BY 1
+     ) sub
+     WHERE country != 'Unknown'
+     ORDER BY count DESC
+     LIMIT 10`
+  );
+  const hideUnknown = (name) => (name === 'Unknown' ? '' : name);
+  const out = rows.map((r) => ({
+    country: hideUnknown(countryToEnglish(r.country)),
+    count: r.count
+  }));
+  if (!userId) return { rows: out, you: null };
+
+  const { rows: userRows } = await pool.query('SELECT country FROM users WHERE id = $1', [userId]);
+  const u = userRows[0];
+  if (!u || !u.country) return { rows: out, you: null };
+
+  const rawCountry = (u.country || '').toString().trim() || 'Unknown';
+  if (rawCountry === 'Unknown') return { rows: out, you: null };
+
+  const { rows: countRows } = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM users
+     WHERE COALESCE(NULLIF(TRIM(country), ''), 'Unknown') = $1`,
+    [rawCountry]
+  );
+  const youCount = countRows[0] ? countRows[0].count : 0;
+  return {
+    rows: out,
+    you: { country: hideUnknown(countryToEnglish(rawCountry)), count: youCount }
+  };
+}
+
+app.get('/api/top-scores', async (req, res) => {
+  const userId = (req.query.userId || '').toString().trim();
+  try {
+    res.json(await queryTopScores(userId));
+  } catch (err) {
+    console.error('DB error:', err);
+    res.status(500).json({ users: [], you: null });
+  }
+});
+
+app.get('/api/last-joined', async (req, res) => {
+  try {
+    res.json(await queryLastJoined());
+  } catch (err) {
+    console.error('DB error:', err);
+    res.status(500).json({ users: [] });
+  }
+});
+
+app.get('/api/positions', async (req, res) => {
+  const since = (req.query.since || '').toString().trim();
+  try {
+    const meta = await queryPositionsMeta();
+    const etag = `"pos-${meta.c}-${meta.mu}"`;
+    res.setHeader('X-Positions-Max-Updated', meta.mu || '');
+
+    if (!since) {
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'private, no-cache');
+      return res.json(await queryPositionsFull());
+    }
+
+    const rows = await queryPositionsSince(since);
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.json(rows);
+  } catch (err) {
+    console.error('DB error:', err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
 app.get('/api/leaderboard', async (req, res) => {
   const userId = (req.query.userId || '').toString().trim();
   try {
-    const { rows } = await pool.query(
-      `SELECT country, count FROM (
-         SELECT COALESCE(NULLIF(TRIM(country), ''), 'Unknown') AS country, COUNT(*)::int AS count
-         FROM users
-         GROUP BY 1
-       ) sub
-       WHERE country != 'Unknown'
-       ORDER BY count DESC
-       LIMIT 10`
-    );
-    const hideUnknown = (name) => (name === 'Unknown' ? '' : name);
-    const out = rows.map((r) => ({
-      country: hideUnknown(countryToEnglish(r.country)),
-      count: r.count
-    }));
-    if (!userId) return res.json({ rows: out, you: null });
-
-    const { rows: userRows } = await pool.query('SELECT country FROM users WHERE id = $1', [userId]);
-    const u = userRows[0];
-    if (!u || !u.country) return res.json({ rows: out, you: null });
-
-    const rawCountry = (u.country || '').toString().trim() || 'Unknown';
-    if (rawCountry === 'Unknown') return res.json({ rows: out, you: null });
-
-    const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM users
-       WHERE COALESCE(NULLIF(TRIM(country), ''), 'Unknown') = $1`,
-      [rawCountry]
-    );
-    const youCount = countRows[0] ? countRows[0].count : 0;
-    res.json({
-      rows: out,
-      you: { country: hideUnknown(countryToEnglish(rawCountry)), count: youCount }
-    });
+    res.json(await queryLeaderboard(userId));
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error', rows: [], you: null });
+  }
+});
+
+/** Combined feed: positions + leaderboard + panels in one HTTP round-trip */
+app.get('/api/dashboard', async (req, res) => {
+  const userId = (req.query.userId || '').toString().trim();
+  const since = (req.query.since || '').toString().trim();
+  const only = (req.query.only || '').toString().trim();
+  const wantPositions = !only || only === 'all' || only.includes('positions');
+  const wantLeaderboard = !only || only === 'all' || only.includes('leaderboard');
+  const wantPanels = !only || only === 'all' || only.includes('panels');
+
+  try {
+    const out = {};
+    let etag = null;
+
+    if (wantPositions) {
+      const meta = await queryPositionsMeta();
+      etag = `"dash-${meta.c}-${meta.mu}"`;
+      res.setHeader('X-Positions-Max-Updated', meta.mu || '');
+
+      if (since) {
+        out.positions = await queryPositionsSince(since);
+      } else {
+        if (!only && req.headers['if-none-match'] === etag) {
+          return res.status(304).end();
+        }
+        out.positions = await queryPositionsFull();
+      }
+    }
+
+    const sideTasks = [];
+    if (wantLeaderboard) sideTasks.push(queryLeaderboard(userId).then((v) => { out.leaderboard = v; }));
+    if (wantPanels) {
+      sideTasks.push(queryLastJoined().then((v) => { out.lastJoined = v; }));
+      sideTasks.push(queryTopScores(userId).then((v) => { out.topScores = v; }));
+    }
+    if (sideTasks.length) await Promise.all(sideTasks);
+
+    if (etag) {
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'private, no-cache');
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('DB error:', err);
+    res.status(500).json({ error: 'DB error' });
   }
 });
 
