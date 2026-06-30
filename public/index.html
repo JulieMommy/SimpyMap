@@ -202,6 +202,81 @@
       height: 19px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 11px rgba(244, 114, 182, 0.5);
     }
+    /* Your marker: badge + pulsing halo (always on, no click) */
+    .me-dot-icon.is-me-marker {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      background: transparent !important;
+      border: none !important;
+    }
+    .me-marker-root {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      pointer-events: none;
+    }
+    .me-marker-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #fdf4ff;
+      background: linear-gradient(135deg, rgba(192, 38, 211, 0.95), rgba(147, 51, 234, 0.95));
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(244, 114, 182, 0.65);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 12px rgba(192, 38, 211, 0.45);
+      white-space: nowrap;
+      margin-bottom: 4px;
+      line-height: 1.25;
+      pointer-events: none;
+    }
+    .me-marker-body {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .me-marker-halo {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 100%;
+      height: 100%;
+      min-width: 22px;
+      min-height: 22px;
+      margin: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(244, 114, 182, 0.9);
+      box-shadow: 0 0 10px rgba(192, 38, 211, 0.55);
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+      animation: me-halo-pulse 2.2s ease-out infinite;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .me-marker-body .me-dot,
+    .me-marker-body .top-scorer-wrap {
+      position: relative;
+      z-index: 1;
+    }
+    .me-dot-icon.is-me-marker:not(.is-selected) .me-marker-body .me-dot:not(.top-scorer-core) {
+      filter: drop-shadow(0 0 6px rgba(244, 114, 182, 0.75));
+    }
+    .me-dot-icon.is-me-marker:not(.is-selected) .me-marker-body .top-scorer-wrap {
+      filter: drop-shadow(0 0 8px rgba(254, 240, 138, 0.55));
+    }
+    @keyframes me-halo-pulse {
+      0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.95;
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.55);
+        opacity: 0.2;
+      }
+    }
     /* Top score: golden star + skin circle in the center */
     .me-dot-icon.top-scorer,
     .other-dot-icon.top-scorer {
@@ -1334,22 +1409,37 @@
     const SELECTED_MARKER_SCALE = 3.5;
     const TOP_SCORER_CORE_EXTRA_PX = 5;
     const TOP_SCORER_STAR_SCALE = 2;
+    const ME_MARKER_SIZE_BONUS = 3;
+    const ME_BADGE_STACK_PX = 20;
 
-    function getNormalDotSize(visits) {
+    function getNormalDotSize(visits, isMe) {
       const bandNum = getVisitBandNumber(visits);
-      return 14 + (bandNum - 1);
+      const base = 14 + (bandNum - 1);
+      return isMe ? base + ME_MARKER_SIZE_BONUS : base;
     }
 
-    function getTopScorerLayout(visits) {
-      const normalDot = getNormalDotSize(visits);
+    function getTopScorerLayout(visits, isMe) {
+      const normalDot = getNormalDotSize(visits, isMe);
       const coreSize = normalDot + TOP_SCORER_CORE_EXTRA_PX;
       const starSize = Math.round(coreSize * TOP_SCORER_STAR_SCALE);
       return { normalDot, coreSize, starSize };
     }
 
-    function getMarkerIconSize(visits, isTopScorer, isSelected) {
-      const size = isTopScorer ? getTopScorerLayout(visits).starSize : getNormalDotSize(visits);
+    function getMarkerIconSize(visits, isTopScorer, isSelected, isMe) {
+      const size = isTopScorer ? getTopScorerLayout(visits, !!isMe).starSize : getNormalDotSize(visits, !!isMe);
       return isSelected ? Math.round(size * SELECTED_MARKER_SCALE) : size;
+    }
+
+    function getMeMarkerIconLayout(visits, isTopScorer, isSelected) {
+      const dotSize = getMarkerIconSize(visits, isTopScorer, isSelected, true);
+      const w = Math.max(dotSize + 20, 40);
+      const h = ME_BADGE_STACK_PX + dotSize + 10;
+      const anchorY = ME_BADGE_STACK_PX + dotSize / 2;
+      return { w, h, anchorY };
+    }
+
+    function wrapMeMarkerHtml(innerHtml) {
+      return `<div class="me-marker-root"><span class="me-marker-badge">You</span><div class="me-marker-body"><span class="me-marker-halo" aria-hidden="true"></span>${innerHtml}</div></div>`;
     }
 
     const Z_MARKER_SCORE_MULT = 10;
@@ -1373,16 +1463,19 @@
       return users;
     }
 
-    function getPopupOffset(visits, isTopScorer, isSelected) {
-      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
+    function getPopupOffset(visits, isTopScorer, isSelected, isMe) {
+      let size = getMarkerIconSize(visits, isTopScorer, isSelected, isMe);
+      if (isMe && !isSelected) size += ME_BADGE_STACK_PX;
       const gap = isSelected ? 6 : 8;
       return L.point(0, -(Math.round(size / 2) + gap));
     }
 
     function bindPlayerPopup(marker, popupHtml, visits, isTopScorer, playerId) {
       const isSelected = selectedPlayerId === playerId;
+      const meta = playerMarkerMeta.get(playerId);
+      const isMe = meta && meta.isMe;
       marker.bindPopup(popupHtml, {
-        offset: getPopupOffset(visits, isTopScorer, isSelected),
+        offset: getPopupOffset(visits, isTopScorer, isSelected, isMe),
         className: isSelected ? 'player-popup player-popup--selected' : 'player-popup'
       });
     }
@@ -1391,7 +1484,7 @@
       const meta = playerMarkerMeta.get(playerId);
       if (!marker || !meta) return;
       const isSelected = selectedPlayerId === playerId;
-      const offset = getPopupOffset(meta.visits, meta.isTopScorer, isSelected);
+      const offset = getPopupOffset(meta.visits, meta.isTopScorer, isSelected, meta.isMe);
       const popup = marker.getPopup();
       if (popup) {
         popup.options.offset = offset;
@@ -1412,11 +1505,13 @@
       return skin.style ? `${delayPart}${skin.style};${shadowPart}` : `${delayPart}${shadowPart}`;
     }
 
-    function buildMarkerDotHtml(dotClass, skin, dotStyle, isTopScorer, visits, isSelected, spawnDelaySec) {
+    function buildMarkerDotHtml(dotClass, skin, dotStyle, isTopScorer, visits, isSelected, spawnDelaySec, isMe) {
       if (!isTopScorer) {
-        return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${dotStyle}"></div>`;
+        const dotSize = getNormalDotSize(visits, isMe);
+        const sizeCss = isMe ? `width:${dotSize}px;height:${dotSize}px;` : '';
+        return `<div class="${dotClass} skin-dot ${skin.extraClass}" style="${sizeCss}${dotStyle}"></div>`;
       }
-      let { coreSize } = getTopScorerLayout(visits);
+      let { coreSize } = getTopScorerLayout(visits, isMe);
       if (isSelected) coreSize = Math.round(coreSize * SELECTED_MARKER_SCALE);
       const wrapStyle = `animation-delay:${spawnDelaySec}s;`;
       const coreStyle = `${dotStyle};width:${coreSize}px;height:${coreSize}px;min-width:${coreSize}px;min-height:${coreSize}px;`;
@@ -1427,18 +1522,19 @@
     function createMeIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
+      const layout = getMeMarkerIconLayout(visits, isTopScorer, isSelected);
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
       const selectedClass = isSelected ? ' is-selected' : '';
       const spawnClass = isSelected ? '' : ' marker-spawn';
       const skin = getSkinStyle(skinId);
       const dotStyle = buildMarkerDotInlineStyle(skin, bandNum, delay, isTopScorer);
+      const innerHtml = buildMarkerDotHtml('me-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay, true);
       return L.divIcon({
-        className: `me-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('me-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay),
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2]
+        className: `me-dot-icon is-me-marker ${bandClass}${topClass}${selectedClass}${spawnClass}`,
+        html: wrapMeMarkerHtml(innerHtml),
+        iconSize: [layout.w, layout.h],
+        iconAnchor: [layout.w / 2, layout.anchorY]
       });
     }
 
@@ -1463,7 +1559,7 @@
     function createOtherIcon(visits, lng, isTopScorer, skinId, isSelected) {
       const bandClass = getVisitBandClass(visits);
       const bandNum = getVisitBandNumber(visits);
-      const size = getMarkerIconSize(visits, isTopScorer, isSelected);
+      const size = getMarkerIconSize(visits, isTopScorer, isSelected, false);
       const delay = spawnDelayFromLng(lng);
       const topClass = isTopScorer ? ' top-scorer' : '';
       const selectedClass = isSelected ? ' is-selected' : '';
@@ -1472,7 +1568,7 @@
       const dotStyle = buildMarkerDotInlineStyle(skin, bandNum, delay, isTopScorer);
       return L.divIcon({
         className: `other-dot-icon ${bandClass}${topClass}${selectedClass}${spawnClass}`,
-        html: buildMarkerDotHtml('other-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay),
+        html: buildMarkerDotHtml('other-dot', skin, dotStyle, isTopScorer, visits, isSelected, delay, false),
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2]
       });
