@@ -1259,10 +1259,10 @@
     const userId = getOrCreateUserId();
     let username = null;
 
-    const FIXED_MAP_ZOOM = 2;
-    const MAP_CENTER = [30, 0];
+    const FIXED_MAP_ZOOM = 4;
+    const MAP_CENTER = [45, 10];
 
-    // Fixed zoom: no scroll/pinch zoom — one world view (large area, not fully globe-flat)
+    // Fixed zoom: ~several countries visible (one region), not whole continents
     const map = L.map('map', {
       zoomControl: false,
       worldCopyJump: false,
