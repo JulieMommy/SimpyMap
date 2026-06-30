@@ -1259,29 +1259,35 @@
     const userId = getOrCreateUserId();
     let username = null;
 
-    // Initialize the map with a simple style
+    const FIXED_MAP_ZOOM = 2;
+    const MAP_CENTER = [30, 0];
+
+    // Fixed zoom: no scroll/pinch zoom — one world view (large area, not fully globe-flat)
     const map = L.map('map', {
-      zoomControl: true,
+      zoomControl: false,
       worldCopyJump: false,
-      minZoom: 3,
-      maxZoom: 14,
-      wheelPxPerZoomLevel: 30
+      minZoom: FIXED_MAP_ZOOM,
+      maxZoom: FIXED_MAP_ZOOM,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      touchZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      dragging: true
     });
 
-    // Initial view: crop Antarctica. Pan limits are wider so zoomed-in panning isn't blocked too soon.
-    const initialBounds = [[-10, -180], [72, 180]];
     const panBounds = [[-58, -180], [85, 180]];
     map.setMaxBounds(panBounds);
     map.options.maxBoundsViscosity = 0.85;
 
-    // Dark basemap for a night-style ambiance (no horizontal world repeat)
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 14,
+      minZoom: FIXED_MAP_ZOOM,
+      maxZoom: FIXED_MAP_ZOOM,
       noWrap: true,
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     }).addTo(map);
 
-    map.fitBounds(initialBounds);
+    map.setView(MAP_CENTER, FIXED_MAP_ZOOM);
 
     // Available skins (type: color | pattern | url for custom image)
     const SKINS = [
@@ -2000,7 +2006,6 @@
           userMarker = L.marker([u.lat, u.lng], { title: displayName, icon: meIcon, zIndexOffset: z })
             .addTo(map);
           bindPlayerPopup(userMarker, popupHtml, visits, isTopScorer, key);
-          map.setView([u.lat, u.lng], 6);
         }
         bindMarkerSelection(userMarker, key);
       } else {
