@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SimpyMap - Julie&apos;s World</title>
+  <link rel="preload" as="image" href="/map/world-dark-z4.webp" type="image/webp" />
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -1280,11 +1281,10 @@
     map.setMaxBounds(panBounds);
     map.options.maxBoundsViscosity = 0.85;
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      minZoom: FIXED_MAP_ZOOM,
-      maxZoom: FIXED_MAP_ZOOM,
-      noWrap: true,
+    // Single pre-built CARTO dark_all image — pan without extra tile HTTP requests
+    L.imageOverlay('/map/world-dark-z4.webp', panBounds, {
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      interactive: false
     }).addTo(map);
 
     map.setView(MAP_CENTER, FIXED_MAP_ZOOM);
@@ -1302,7 +1302,7 @@
       // BLACKED affiché tout en bas de la liste
       { id: 'blacked', name: 'BLACKED', type: 'pattern', pattern: 'blacked', hex: '#0f172a' }
     ];
-    let fixedImageSkins = []; // filled by GET /api/skins (backend-defined image URLs, read-only)
+    let fixedImageSkins = []; // filled by dashboard (skins) on full load
     let unlockedExternalSkins = []; // e.g. ['Drone', 'blacked', 'Spiral'] when unlocked
     let unlockedHiddenSkins = []; // e.g. [{ id: 'hidden:JULIEPFP', name, imageUrl }]
     const PAID_SKIN_IDS = ['Drone', 'blacked', 'Spiral'];
@@ -1631,12 +1631,21 @@
 
     // Next-point timer: nextPointAt = ISO string (next UTC midnight) or null if available now
     let nextPointAt = null;
+    let lastDashboardFetchAt = 0;
+    const DASHBOARD_SSE_COOLDOWN_MS = 4000;
+
+    function applyNextPointData(data) {
+      if (!data) return;
+      nextPointAt = data.nextPointAt != null ? data.nextPointAt : null;
+      updateNextPointDisplay();
+    }
+
     function fetchNextPoint() {
-      fetch(`/api/next-point?userId=${encodeURIComponent(userId)}`)
-        .then((r) => r.json())
-        .then((data) => {
-          nextPointAt = data.nextPointAt || null;
-          updateNextPointDisplay();
+      fetchDashboard({ only: 'nextPoint' })
+        .then((payload) => {
+          if (!payload.unchanged && payload.data && payload.data.nextPoint) {
+            applyNextPointData(payload.data.nextPoint);
+          }
         })
         .catch(() => {});
     }
@@ -1665,7 +1674,6 @@
       countEl.textContent = `${h}h ${m}m ${s}s`;
     }
     setInterval(updateNextPointDisplay, 1000);
-    fetchNextPoint();
 
     // Send position to server (with skin so everyone sees it)
     function sendPosition(lat, lng) {
@@ -1681,6 +1689,7 @@
           if (data.nextPointAt != null) nextPointAt = data.nextPointAt;
           else nextPointAt = null;
           updateNextPointDisplay();
+          lastDashboardFetchAt = Date.now();
           return data;
         });
     }
@@ -1802,7 +1811,7 @@
       return div.innerHTML;
     }
 
-    const FALLBACK_SYNC_MS = 5 * 60 * 1000; // safety full check every 5 min (often 304)
+    const FALLBACK_SYNC_MS = 12 * 60 * 1000; // safety full check every 12 min (often 304)
     let dashboardEtag = null;
     let lastPositionsSync = '';
     let fallbackTimer = null;
@@ -1833,6 +1842,14 @@
       list.innerHTML = html;
     }
 
+    function applySkinsData(data) {
+      if (!data) return;
+      fixedImageSkins = data.fixedImageSkins || [];
+      unlockedExternalSkins = data.unlockedExternalSkins || [];
+      unlockedHiddenSkins = data.unlockedHiddenSkins || [];
+      if (typeof renderSkinList === 'function') renderSkinList();
+    }
+
     function applyDashboardData(data, opts) {
       const isFullSync = opts && opts.fullSync;
       if (data.positions) {
@@ -1845,6 +1862,8 @@
       if (data.leaderboard) renderLeaderboard(data.leaderboard);
       if (data.lastJoined) renderLastJoined(data.lastJoined);
       if (data.topScores) renderTopScores(data.topScores);
+      if (data.skins) applySkinsData(data.skins);
+      if (data.nextPoint) applyNextPointData(data.nextPoint);
     }
 
     function fetchDashboard(opts) {
@@ -1854,13 +1873,19 @@
       if (opts.since) params.set('since', opts.since);
       if (opts.only) params.set('only', opts.only);
       return fetch(`/api/dashboard?${params}`, { headers }).then((res) => {
-        if (res.status === 304) return { res, data: null, unchanged: true };
+        if (res.status === 304) {
+          lastDashboardFetchAt = Date.now();
+          return { res, data: null, unchanged: true };
+        }
         if (!res.ok) throw new Error('dashboard fetch failed');
         const maxUpd = res.headers.get('X-Positions-Max-Updated');
         if (maxUpd && maxUpd > lastPositionsSync) lastPositionsSync = maxUpd;
         const etag = res.headers.get('ETag');
         if (etag) dashboardEtag = etag;
-        return res.json().then((data) => ({ res, data, unchanged: false }));
+        return res.json().then((data) => {
+          lastDashboardFetchAt = Date.now();
+          return { res, data, unchanged: false };
+        });
       });
     }
 
@@ -1884,6 +1909,7 @@
     }
 
     function applySseUpdates() {
+      if (Date.now() - lastDashboardFetchAt < DASHBOARD_SSE_COOLDOWN_MS) return;
       const flags = { ...pendingSse };
       pendingSse = { p: false, l: false, b: false };
       const only = sseOnlyParam(flags);
@@ -1926,13 +1952,13 @@
       mapEventSource = new EventSource('/api/events');
       mapEventSource.addEventListener('update', (e) => queueSseUpdate(e.data));
       mapEventSource.onopen = () => {
-        if (lastPositionsSync) {
-          fetchDashboard({ since: lastPositionsSync, only: 'positions' })
+        if (Date.now() - lastDashboardFetchAt < DASHBOARD_SSE_COOLDOWN_MS) return;
+        if (!lastPositionsSync) return;
+        fetchDashboard({ since: lastPositionsSync, only: 'positions' })
             .then((payload) => {
               if (!payload.unchanged && payload.data) applyDashboardData(payload.data, {});
             })
             .catch(() => {});
-        }
       };
       mapEventSource.onerror = () => {
         // EventSource auto-reconnects; onopen will delta-sync
@@ -2045,6 +2071,7 @@
     }
 
     function loadAllPositions() {
+      lastDashboardFetchAt = Date.now();
       fetchDashboard({ full: true })
         .then((payload) => {
           if (payload.unchanged || !payload.data) return;
@@ -2306,15 +2333,13 @@
       const list = document.getElementById('skin-list');
       if (!panel || !toggle) return;
       toggle.addEventListener('click', () => panel.classList.toggle('is-collapsed'));
-      function loadSkins() {
-        fetch(`/api/skins?userId=${encodeURIComponent(userId)}`).then((r) => r.json()).then((data) => {
-          fixedImageSkins = data.fixedImageSkins || [];
-          unlockedExternalSkins = data.unlockedExternalSkins || [];
-          unlockedHiddenSkins = data.unlockedHiddenSkins || [];
-          renderSkinList();
-        }).catch(() => { fixedImageSkins = []; unlockedExternalSkins = []; unlockedHiddenSkins = []; renderSkinList(); });
+      function refreshSkins() {
+        fetchDashboard({ only: 'skins' })
+          .then((payload) => {
+            if (!payload.unchanged && payload.data && payload.data.skins) applySkinsData(payload.data.skins);
+          })
+          .catch(() => { fixedImageSkins = []; unlockedExternalSkins = []; unlockedHiddenSkins = []; renderSkinList(); });
       }
-      loadSkins();
       list.addEventListener('click', (e) => {
         const item = e.target.closest('.skin-item');
         if (!item) return;
@@ -2333,7 +2358,7 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ userId: userId })
-            }).then(function() { loadSkins(); }).catch(function() { loadSkins(); });
+            }).then(function() { refreshSkins(); }).catch(function() { refreshSkins(); });
           }, 20000);
           return;
         }
@@ -2364,7 +2389,6 @@
     }
     setupSkinPanel();
 
-    loadAllPositions();
     connectMapEvents();
     scheduleFallbackSync();
   </script>

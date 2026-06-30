@@ -247,28 +247,34 @@ async function canUseSkin(skinId, userScore, userId) {
   return score >= req.minVisits;
 }
 
+async function querySkins(userId) {
+  const fixedImageSkins = getFixedImageSkins();
+  if (!userId) {
+    return { fixedImageSkins, unlockedExternalSkins: [], unlockedHiddenSkins: [] };
+  }
+  const { rows } = await pool.query(
+    'SELECT "skinId" FROM external_unlocks WHERE "userId" = $1',
+    [userId]
+  );
+  const seenHidden = new Set();
+  const unlockedHiddenSkins = [];
+  rows.forEach((r) => {
+    const entry = getHiddenSkinEntry(r.skinId);
+    if (!entry || seenHidden.has(entry.id)) return;
+    seenHidden.add(entry.id);
+    unlockedHiddenSkins.push(entry);
+  });
+  return {
+    fixedImageSkins,
+    unlockedExternalSkins: rows.map((r) => r.skinId),
+    unlockedHiddenSkins
+  };
+}
+
 app.get('/api/skins', async (req, res) => {
   const userId = (req.query.userId || '').toString().trim();
-  const fixedImageSkins = getFixedImageSkins();
-  if (!userId) return res.json({ fixedImageSkins, unlockedExternalSkins: [], unlockedHiddenSkins: [] });
   try {
-    const { rows } = await pool.query(
-      'SELECT "skinId" FROM external_unlocks WHERE "userId" = $1',
-      [userId]
-    );
-    const seenHidden = new Set();
-    const unlockedHiddenSkins = [];
-    rows.forEach((r) => {
-      const entry = getHiddenSkinEntry(r.skinId);
-      if (!entry || seenHidden.has(entry.id)) return;
-      seenHidden.add(entry.id);
-      unlockedHiddenSkins.push(entry);
-    });
-    res.json({
-      fixedImageSkins,
-      unlockedExternalSkins: rows.map((r) => r.skinId),
-      unlockedHiddenSkins
-    });
+    res.json(await querySkins(userId));
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
@@ -691,19 +697,8 @@ app.post('/api/position', async (req, res) => {
 app.get('/api/next-point', async (req, res) => {
   const userId = req.query.userId;
   if (!userId) return res.status(400).json({ error: 'userId required' });
-  const today = new Date().toISOString().slice(0, 10);
   try {
-    const { rows } = await pool.query(
-      `SELECT visits, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt" FROM users WHERE id = $1`,
-      [userId]
-    );
-    const row = rows[0];
-    if (!row) return res.json({ nextPointAt: null, visits: 0 });
-    const visits = typeof row.visits === 'number' ? row.visits : 0;
-    const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
-    const lastEarned = effectiveLastPointEarnedAt(row);
-    const nextPointAt = computeNextPointAt(visits, lastEarned, lastDate, today);
-    res.json({ nextPointAt, visits });
+    res.json(await queryNextPoint(userId));
   } catch (err) {
     console.error('DB error:', err);
     res.status(500).json({ error: 'DB error' });
@@ -949,6 +944,21 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 });
 
+async function queryNextPoint(userId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { rows } = await pool.query(
+    `SELECT visits, "lastVisitDate", "lastPointEarnedAt", "createdAt", "updatedAt" FROM users WHERE id = $1`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row) return { nextPointAt: null, visits: 0 };
+  const visits = typeof row.visits === 'number' ? row.visits : 0;
+  const lastDate = row.lastVisitDate ? String(row.lastVisitDate).slice(0, 10) : '';
+  const lastEarned = effectiveLastPointEarnedAt(row);
+  const nextPointAt = computeNextPointAt(visits, lastEarned, lastDate, today);
+  return { nextPointAt, visits };
+}
+
 /** Combined feed: positions + leaderboard + panels in one HTTP round-trip */
 app.get('/api/dashboard', async (req, res) => {
   const userId = (req.query.userId || '').toString().trim();
@@ -957,6 +967,9 @@ app.get('/api/dashboard', async (req, res) => {
   const wantPositions = !only || only === 'all' || only.includes('positions');
   const wantLeaderboard = !only || only === 'all' || only.includes('leaderboard');
   const wantPanels = !only || only === 'all' || only.includes('panels');
+  const wantSkins = !only || only === 'all' || only.includes('skins');
+  const isFullLoad = !since && !only;
+  const wantNextPoint = isFullLoad || only.includes('nextPoint');
 
   try {
     const out = {};
@@ -970,7 +983,7 @@ app.get('/api/dashboard', async (req, res) => {
       if (since) {
         out.positions = await queryPositionsSince(since);
       } else {
-        if (!only && req.headers['if-none-match'] === etag) {
+        if (isFullLoad && req.headers['if-none-match'] === etag) {
           return res.status(304).end();
         }
         out.positions = await queryPositionsFull();
@@ -982,6 +995,10 @@ app.get('/api/dashboard', async (req, res) => {
     if (wantPanels) {
       sideTasks.push(queryLastJoined().then((v) => { out.lastJoined = v; }));
       sideTasks.push(queryTopScores(userId).then((v) => { out.topScores = v; }));
+    }
+    if (wantSkins) sideTasks.push(querySkins(userId).then((v) => { out.skins = v; }));
+    if (wantNextPoint && userId) {
+      sideTasks.push(queryNextPoint(userId).then((v) => { out.nextPoint = v; }));
     }
     if (sideTasks.length) await Promise.all(sideTasks);
 

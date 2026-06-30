@@ -4,7 +4,8 @@
   "description": "Carte du monde partagee avec positions des utilisateurs.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:map": "node scripts/build-map-image.mjs"
   },
   "keywords": [
     "map",
@@ -21,5 +22,8 @@
     "express": "^4.19.0",
     "i18n-iso-countries": "^7.14.0",
     "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.2"
   }
 }
