@@ -1281,8 +1281,12 @@
     map.setMaxBounds(panBounds);
     map.options.maxBoundsViscosity = 0.85;
 
-    // Single pre-built CARTO dark_all image — pan without extra tile HTTP requests
-    L.imageOverlay('/map/world-dark-z4.webp', panBounds, {
+    // Image corners = exact z4 tile grid (not panBounds) so markers align with geography
+    const mapImageBounds = [
+      [-66.51326044311186, -180],
+      [85.0511287798066, 180]
+    ];
+    L.imageOverlay('/map/world-dark-z4.webp', mapImageBounds, {
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
       interactive: false
     }).addTo(map);

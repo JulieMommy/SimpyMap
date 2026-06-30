@@ -28,6 +28,24 @@ function lng2tile(lng, zoom) {
   return Math.floor(((lng + 180) / 360) * 2 ** zoom);
 }
 
+function tile2lat(y, zoom) {
+  const n = Math.PI - (2 * Math.PI * y) / 2 ** zoom;
+  return (180 / Math.PI) * Math.atan(Math.sinh(n));
+}
+
+function tile2lng(x, zoom) {
+  return (x / 2 ** zoom) * 360 - 180;
+}
+
+function imageBoundsFromTiles(xMin, xMax, yMin, yMax, zoom) {
+  return {
+    south: tile2lat(yMax + 1, zoom),
+    west: tile2lng(xMin, zoom),
+    north: tile2lat(yMin, zoom),
+    east: tile2lng(xMax + 1, zoom)
+  };
+}
+
 function tileUrl(x, y) {
   const host = CARTO_HOSTS[(x + y) % CARTO_HOSTS.length];
   return `https://${host}.basemaps.cartocdn.com/${STYLE}/${ZOOM}/${x}/${y}.png`;
@@ -52,8 +70,12 @@ async function main() {
   const rows = yMax - yMin + 1;
   const width = cols * TILE;
   const height = rows * TILE;
+  const geo = imageBoundsFromTiles(xMin, xMax, yMin, yMax, ZOOM);
 
   console.log(`Stitching ${cols}×${rows} tiles → ${width}×${height}px`);
+  console.log(
+    `Bounds: [[${geo.south}, ${geo.west}], [${geo.north}, ${geo.east}]]`
+  );
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
@@ -84,7 +106,27 @@ async function main() {
     .toFile(OUT_WEBP);
 
   const stat = fs.statSync(OUT_WEBP);
+  const boundsPath = path.join(OUT_DIR, 'world-dark-z4.bounds.json');
+  fs.writeFileSync(
+    boundsPath,
+    JSON.stringify(
+      {
+        zoom: ZOOM,
+        south: geo.south,
+        west: geo.west,
+        north: geo.north,
+        east: geo.east,
+        leaflet: [
+          [geo.south, geo.west],
+          [geo.north, geo.east]
+        ]
+      },
+      null,
+      2
+    )
+  );
   console.log(`✅ ${OUT_WEBP} (${(stat.size / 1024).toFixed(0)} KiB)`);
+  console.log(`✅ ${boundsPath}`);
 }
 
 main().catch((err) => {
