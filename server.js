@@ -65,6 +65,7 @@ function brotliCompress(options = {}) {
         body,
         { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality } },
         (err, compressed) => {
+          if (res.headersSent) return;
           if (err) return flush(body);
           res.setHeader('Content-Encoding', 'br');
           res.setHeader('Vary', 'Accept-Encoding');
@@ -90,6 +91,8 @@ app.use(
     filter(req, res) {
       if (skipHttpCompress(req)) return false;
       if (res.getHeader('Content-Encoding')) return false;
+      // Brotli middleware handles br clients; avoid double-patching res.end
+      if (/\bbr\b/.test(req.headers['accept-encoding'] || '')) return false;
       return compression.filter(req, res);
     }
   })
