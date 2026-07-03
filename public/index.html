@@ -1260,20 +1260,22 @@
     const userId = getOrCreateUserId();
     let username = null;
 
-    const FIXED_MAP_ZOOM = 4;
+    const MAP_MIN_ZOOM = 3;
+    const MAP_MAX_ZOOM = 6;
+    const MAP_DEFAULT_ZOOM = 5;
     const MAP_CENTER = [45, 10];
 
-    // Fixed zoom: ~several countries visible (one region), not whole continents
+    // Single preloaded image (imageOverlay): zoom/pan = no extra HTTP, markers stay on lat/lng
     const map = L.map('map', {
-      zoomControl: false,
+      zoomControl: true,
       worldCopyJump: false,
-      minZoom: FIXED_MAP_ZOOM,
-      maxZoom: FIXED_MAP_ZOOM,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      touchZoom: false,
+      minZoom: MAP_MIN_ZOOM,
+      maxZoom: MAP_MAX_ZOOM,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
+      touchZoom: true,
       boxZoom: false,
-      keyboard: false,
+      keyboard: true,
       dragging: true
     });
 
@@ -1291,7 +1293,7 @@
       interactive: false
     }).addTo(map);
 
-    map.setView(MAP_CENTER, FIXED_MAP_ZOOM);
+    map.setView(MAP_CENTER, MAP_DEFAULT_ZOOM);
 
     // Available skins (type: color | pattern | url for custom image)
     const SKINS = [
