@@ -1,7 +1,5 @@
 require('dotenv').config();
-const zlib = require('zlib');
 const compression = require('compression');
-const compressible = require('compressible');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -12,87 +10,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-const skipHttpCompress = (req) => req.path === '/api/events';
-
-/** Brotli when Accept-Encoding: br; gzip via compression() as fallback */
-function brotliCompress(options = {}) {
-  const threshold = options.threshold ?? 256;
-  const filter = options.filter ?? (() => true);
-  const quality = options.quality ?? 4;
-
-  return (req, res, next) => {
-    if (!filter(req, res)) return next();
-    const accept = req.headers['accept-encoding'] || '';
-    if (!/\bbr\b/.test(accept) || req.method === 'HEAD') return next();
-
-    let ended = false;
-    const write = res.write.bind(res);
-    const end = res.end.bind(res);
-    const chunks = [];
-
-    res.write = (chunk, encoding) => {
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
-      return true;
-    };
-
-    res.end = (chunk, encoding, callback) => {
-      if (ended) return false;
-      ended = true;
-      if (typeof encoding === 'function') {
-        callback = encoding;
-        encoding = undefined;
-      }
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
-
-      const restore = () => {
-        res.write = write;
-        res.end = end;
-      };
-
-      const flush = (body) => {
-        restore();
-        end(body, callback);
-      };
-
-      const body = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
-      const type = String(res.getHeader('Content-Type') || '').split(';')[0].trim();
-
-      if (body.length < threshold || !compressible(type)) {
-        return flush(body);
-      }
-
-      zlib.brotliCompress(
-        body,
-        { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality } },
-        (err, compressed) => {
-          if (res.headersSent) return;
-          if (err) return flush(body);
-          res.setHeader('Content-Encoding', 'br');
-          res.setHeader('Vary', 'Accept-Encoding');
-          res.setHeader('Content-Length', compressed.length);
-          flush(compressed);
-        }
-      );
-    };
-
-    next();
-  };
-}
-
-app.use(
-  brotliCompress({
-    threshold: 256,
-    filter: (req, res) => !skipHttpCompress(req) && !res.getHeader('Content-Encoding')
-  })
-);
 app.use(
   compression({
     threshold: 256,
     filter(req, res) {
-      if (skipHttpCompress(req)) return false;
-      if (res.getHeader('Content-Encoding')) return false;
-      // Brotli middleware handles br clients; avoid double-patching res.end
-      if (/\bbr\b/.test(req.headers['accept-encoding'] || '')) return false;
+      if (req.path === '/api/events') return false;
       return compression.filter(req, res);
     }
   })
