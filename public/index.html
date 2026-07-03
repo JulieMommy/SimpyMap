@@ -4,7 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SimpyMap - Julie&apos;s World</title>
-  <link rel="preload" as="image" href="/map/world-dark-z4.webp" type="image/webp" />
+  <script>
+    (function () {
+      var url = '/map/world-dark-z4.webp';
+      try {
+        var c = document.createElement('canvas');
+        c.width = c.height = 1;
+        if (c.toDataURL('image/avif').indexOf('image/avif') > 0) url = '/map/world-dark-z4.avif';
+      } catch (e) { /* WebP fallback */ }
+      window.__MAP_IMAGE_URL__ = url;
+      var link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = url;
+      link.type = url.endsWith('.avif') ? 'image/avif' : 'image/webp';
+      document.head.appendChild(link);
+    })();
+  </script>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -1288,7 +1304,7 @@
       [-66.51326044311186, -180],
       [85.0511287798066, 180]
     ];
-    L.imageOverlay('/map/world-dark-z4.webp', mapImageBounds, {
+    L.imageOverlay(window.__MAP_IMAGE_URL__ || '/map/world-dark-z4.webp', mapImageBounds, {
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
       interactive: false
     }).addTo(map);

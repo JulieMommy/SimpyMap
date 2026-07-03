@@ -10,6 +10,9 @@ import sharp from 'sharp';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, '..', 'public', 'map');
 const OUT_WEBP = path.join(OUT_DIR, 'world-dark-z4.webp');
+const OUT_AVIF = path.join(OUT_DIR, 'world-dark-z4.avif');
+const WEBP_QUALITY = 62;
+const AVIF_QUALITY = 45;
 
 const ZOOM = 4;
 const TILE = 256;
@@ -97,15 +100,16 @@ async function main() {
     }
   }
 
-  console.log('\nEncoding WebP…');
-  await sharp({
+  console.log('\nEncoding WebP + AVIF…');
+  const stitched = sharp({
     create: { width, height, channels: 4, background: { r: 2, g: 6, b: 23, alpha: 1 } }
-  })
-    .composite(composites)
-    .webp({ quality: 82, effort: 6 })
-    .toFile(OUT_WEBP);
+  }).composite(composites);
 
-  const stat = fs.statSync(OUT_WEBP);
+  await stitched.clone().webp({ quality: WEBP_QUALITY, effort: 6 }).toFile(OUT_WEBP);
+  await stitched.clone().avif({ quality: AVIF_QUALITY, effort: 6 }).toFile(OUT_AVIF);
+
+  const webpStat = fs.statSync(OUT_WEBP);
+  const avifStat = fs.statSync(OUT_AVIF);
   const boundsPath = path.join(OUT_DIR, 'world-dark-z4.bounds.json');
   fs.writeFileSync(
     boundsPath,
@@ -125,7 +129,8 @@ async function main() {
       2
     )
   );
-  console.log(`✅ ${OUT_WEBP} (${(stat.size / 1024).toFixed(0)} KiB)`);
+  console.log(`✅ ${OUT_WEBP} (${(webpStat.size / 1024).toFixed(0)} KiB, q${WEBP_QUALITY})`);
+  console.log(`✅ ${OUT_AVIF} (${(avifStat.size / 1024).toFixed(0)} KiB, q${AVIF_QUALITY})`);
   console.log(`✅ ${boundsPath}`);
 }
 

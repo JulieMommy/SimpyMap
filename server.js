@@ -114,7 +114,7 @@ app.use(
     setHeaders(res, filePath) {
       if (/\.html?$/i.test(filePath)) {
         res.setHeader('Cache-Control', 'no-cache');
-      } else if (/\.(png|jpe?g|gif|webp|ico|svg)$/i.test(filePath)) {
+      } else if (/\.(png|jpe?g|gif|webp|avif|ico|svg)$/i.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
       }
     }
