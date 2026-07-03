@@ -752,15 +752,21 @@ const POSITION_COLUMNS =
   'id, lat, lng, username, visits, skin, "anonymousLocation", "manualOverride", "updatedAt"';
 const POSITIONS_WHERE = 'lat IS NOT NULL AND lng IS NOT NULL';
 
+function roundCoord(n) {
+  return Math.round(Number(n) * 10000) / 10000;
+}
+
 function mapPositionRow(row) {
+  const visits = typeof row.visits === 'number' ? row.visits : Number(row.visits) || 1;
+  const skinRaw = row.skin != null ? String(row.skin).trim() : '';
   const out = {
     id: row.id,
-    lat: row.lat,
-    lng: row.lng,
-    username: row.username,
-    visits: typeof row.visits === 'number' ? row.visits : Number(row.visits) || 1,
-    skin: row.skin
+    lat: roundCoord(row.lat),
+    lng: roundCoord(row.lng),
+    username: row.username
   };
+  if (visits !== 1) out.visits = visits;
+  if (skinRaw && skinRaw !== 'red') out.skin = skinRaw;
   if (row.anonymousLocation === true || row.anonymousLocation === 't') out.anonymousLocation = true;
   if (row.manualOverride === true || row.manualOverride === 't') out.manualOverride = true;
   return out;

@@ -2095,8 +2095,9 @@
       if (!valid.length) return;
       if (isFullSync) {
         updateTopBarVisitors(valid.length);
-        const maxVisits = Math.max(...valid.map((u) => (typeof u.visits === 'number' ? u.visits : 0)));
-        const topScorerIds = new Set(valid.filter((u) => (u.visits || 0) === maxVisits).map((u) => u.id));
+        const visitsOf = (u) => (typeof u.visits === 'number' ? u.visits : 1);
+        const maxVisits = Math.max(...valid.map(visitsOf));
+        const topScorerIds = new Set(valid.filter((u) => visitsOf(u) === maxVisits).map((u) => u.id));
         sortPlayersByScoreAsc(valid);
         valid.forEach((u) => applySinglePositionUser(u, topScorerIds));
         if (typeof renderSkinList === 'function') renderSkinList();
