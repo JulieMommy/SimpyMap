@@ -1762,7 +1762,10 @@
       return n + 'th';
     }
 
+    let lastTopScoresData = null;
+
     function renderTopScores(data) {
+      lastTopScoresData = data;
       const list = document.getElementById('top-scores-list');
       if (!list) return;
       const users = (data.users || []).slice(0, 10);
@@ -1848,16 +1851,28 @@
       list.innerHTML = html;
     }
 
-    function applySkinsData(data) {
-      if (!data) return;
+    function applySkinsPayload(data) {
+      if (!data) return false;
       fixedImageSkins = data.fixedImageSkins || [];
       unlockedExternalSkins = data.unlockedExternalSkins || [];
       unlockedHiddenSkins = data.unlockedHiddenSkins || [];
+      return true;
+    }
+
+    function refreshSkinVisuals() {
       if (typeof renderSkinList === 'function') renderSkinList();
+      playerMarkerMeta.forEach((_, id) => refreshMarkerIcon(id));
+      if (lastTopScoresData) renderTopScores(lastTopScoresData);
+    }
+
+    function applySkinsData(data) {
+      if (!applySkinsPayload(data)) return;
+      refreshSkinVisuals();
     }
 
     function applyDashboardData(data, opts) {
       const isFullSync = opts && opts.fullSync;
+      const skinsUpdated = data.skins ? applySkinsPayload(data.skins) : false;
       if (data.positions) {
         if (isFullSync || !lastPositionsSync) {
           applyPositionUsers(data.positions, true);
@@ -1868,8 +1883,8 @@
       if (data.leaderboard) renderLeaderboard(data.leaderboard);
       if (data.lastJoined) renderLastJoined(data.lastJoined);
       if (data.topScores) renderTopScores(data.topScores);
-      if (data.skins) applySkinsData(data.skins);
       if (data.nextPoint) applyNextPointData(data.nextPoint);
+      if (skinsUpdated && !data.positions) refreshSkinVisuals();
     }
 
     function fetchDashboard(opts) {
