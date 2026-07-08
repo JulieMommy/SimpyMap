@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const compression = require('compression');
 const express = require('express');
 const fs = require('fs');
@@ -9,6 +10,28 @@ const { pool, initSchema } = require('./db.js');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const INDEX_PATH = path.join(PUBLIC_DIR, 'index.html');
+const APP_JS_PATH = path.join(PUBLIC_DIR, 'assets', 'app.js');
+const APP_CSS_PATH = path.join(PUBLIC_DIR, 'assets', 'app.css');
+
+let indexHtmlTemplate = '';
+let assetVersion = '';
+
+function refreshAssetVersion() {
+  indexHtmlTemplate = fs.readFileSync(INDEX_PATH, 'utf8');
+  const js = fs.readFileSync(APP_JS_PATH);
+  const css = fs.readFileSync(APP_CSS_PATH);
+  assetVersion = crypto.createHash('sha256').update(js).update(css).digest('hex').slice(0, 12);
+}
+
+function sendIndexHtml(res) {
+  if (!indexHtmlTemplate) refreshAssetVersion();
+  const html = indexHtmlTemplate.replace(/__ASSET_V__/g, assetVersion);
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('html').send(html);
+}
+
+refreshAssetVersion();
 
 app.use(
   compression({
@@ -107,12 +130,18 @@ app.post('/api/unlock-drone', async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => sendIndexHtml(res));
+app.get('/index.html', (req, res) => sendIndexHtml(res));
+
 app.use(
   express.static(PUBLIC_DIR, {
+    index: false,
     etag: true,
     lastModified: true,
     setHeaders(res, filePath) {
-      if (/\.html?$/i.test(filePath)) {
+      if (/[/\\]assets[/\\].*\.(js|css)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (/\.html?$/i.test(filePath)) {
         res.setHeader('Cache-Control', 'no-cache');
       } else if (/\.(png|jpe?g|gif|webp|avif|ico|svg)$/i.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
